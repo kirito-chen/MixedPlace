@@ -1,0 +1,49 @@
+mode: ddpo
+batch_size: 1  # 是同一个case的副本数量，因为节点维度不一样
+actual_batch: 4  # 4 # 一次采样中循环采样的数量  只有用train_graph_actual_batch才起作用 也就是多少个不同样例，真正的batch_size
+# actual_batch 最大就是16，32就会OOM
+##### 训练总次数 num_epochs * 2 * num_batches_per_epoch * total_timesteps
+num_epochs: 150  # 训练总批次 200
+# all_sample_num: 10000
+num_batches_per_epoch: 8 # 16  # 采样和计算loss次数
+num_inner_epochs: 1 # 训练的内部次数 官方次数为1 请不要修改
+gradient_accumulation_steps: 10 # 累积梯度更新步数  需要 < total_timesteps  
+max_grad_norm: 1.0  # 梯度裁剪的最大梯度范数
+
+total_timesteps: 50  # 总的时间步 50
+
+lr: 2e-6  # 1e-4 | 5e-5 | 1e-6  # 1e-5 DDPO论文 
+eta: 0.3  # 0.0 就是DDIM  1.0 就是DDPM  !!!!!!!!!!!不能取 0.0 会导致对数概率变成nan
+adv_clip_max: 3 # 优势函数上下限 5 
+clip_range: 1e-4 # the PPO clip range. 0.2 | 0.12 | 1e-4 为DDPO论文中采用的
+
+reward_version: "norm"  #  norm | oral
+
+save_freq: 20 # 保留间隔
+eval_every: 5  # 评估间隔
+
+mse_loss_weight: 0.1
+val_batch_size: 1
+
+ent_coef: 1e-3
+
+scale_factor: 1  # hpwl优化率放大倍率
+
+ddpo:
+  legality_weight: 1
+  hpwl_weight: 1
+  legal_target: 0.93  # 合法化惩罚项目标
+  ema_factor: 0.92 # 0.999 | 0.99 
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  adam_weight_decay: 1e-4
+  adam_epsilon: 1e-8
+
+per_prompt_stat_tracking:
+  stat_tracking: True # True | False
+  stat_tracker_buffer_size: 50 # 每个prompt历史记录的长度
+  stat_tracker_min_count: 5  # 某个prompt历史记录达到多少个才用自己的均值和std
+
+# 是否开启中间奖励
+intermediate: True # True | False
+legal_gate: True # True | False

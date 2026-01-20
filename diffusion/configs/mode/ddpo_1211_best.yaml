@@ -1,0 +1,32 @@
+mode: ddpo
+batch_size: 1  # 是同一个case的副本数量，因为节点维度不一样
+actual_batch: 8 # 一次采样中循环采样的数量  只有用train_graph_actual_batch才起作用 也就是多少个不同样例，真正的batch_size
+# actual_batch 最大就是16，32就会OOM
+##### 训练总次数 num_epochs * 2 * num_batches_per_epoch * total_timesteps
+num_epochs: 30  # 训练总批次 200
+num_batches_per_epoch: 16 # 16  # 采样和计算loss次数
+num_inner_epochs: 1 # 训练的内部次数 官方次数为1 请不要修改
+gradient_accumulation_steps: 1 # 累积梯度更新步数  需要 < total_timesteps  
+max_grad_norm: 1.0  # 梯度裁剪的最大梯度范数
+
+total_timesteps: 50  # 总的时间步 50
+
+lr: 1e-5  # 1e-4 | 5e-5 | 1e-6
+eta: 0.3  # 0.0 就是DDIM  1.0 就是DDPM  !!!!!!!!!!!不能取 0.0 会导致对数概率变成nan
+adv_clip_max: 3 # 优势函数上下限 5 
+clip_range: 0.12 # the PPO clip range. 0.2
+
+reward_version: "norm"  #  norm | oral
+
+save_freq: 30 # 保留间隔
+eval_every: 5 # 评估间隔
+
+mse_loss_weight: 0.1
+val_batch_size: 1
+
+ent_coef: 1e-3
+
+ddpo:
+  legality_weight: 3  # !!!!!!!!!!! 暂时不用外部权重，而是用动态权重
+  hpwl_weight: 1
+  ema_factor: 0.92 # 0.999 | 0.99 

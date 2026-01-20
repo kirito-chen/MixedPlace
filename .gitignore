@@ -1,0 +1,8 @@
+.vscode
+benchmarks/*
+data-gen/outputs/*
+data-gen/v1.61.zip
+datasets/graph
+hmetis*
+logs
+preTrainModel
