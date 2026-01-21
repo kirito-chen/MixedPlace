@@ -11,6 +11,8 @@ import matplotlib.pyplot as plt
 
 from Connected import find_connected_components
 
+from collections import defaultdict
+
 #复制文件
 import shutil
 
@@ -1962,26 +1964,56 @@ class DataBase:
             if cond.is_macros[id] or cond.is_ports[id]:
                 self.macros[id] = node
         # net  目前的net都是无向边
-        numNets = cond.edge_index.shape[1] // 2
-        netSize = 2  # 目前所有边都是普通边
-        netData = cond.edge_index.T
-        pinData = cond.edge_attr  # edge_attr[e] = [src_dx, src_dy, sink_dx, sink_dy]
-        for netId in range(numNets):
-            netName = f"net{netId}"
-            net = Net(netName, len(self.pins), netSize)
-            self.nets[netName] = net
-            # 两个pin
-            nodeName1 = f"a{netData[netId][0]}"
-            nodeName2 = f"a{netData[netId][1]}"
-            pin1centerX = float(pinData[netId][0]) * scale
-            pin1centerY = float(pinData[netId][1]) * scale
-            pin2centerX = float(pinData[netId][2]) * scale
-            pin2centerY = float(pinData[netId][3]) * scale
+        if False: #cond.edge_pin_id:
+            netData = cond.edge_index.T
+            pinData = cond.edge_attr
+            edge2net = cond.edge_pin_id
 
-            pin1 = Pin(nodeName1, pin1centerX, pin1centerY)
-            pin2 = Pin(nodeName2, pin2centerX, pin2centerY)
-            self.pins.append(pin1)
-            self.pins.append(pin2)
+            # 按 netId 分组 edge
+            net_groups = defaultdict(list)
+            for e, netId in enumerate(edge2net):
+                net_groups[netId].append(e)
+
+            # 构造每个 Net
+            for netId, edge_indices in net_groups.items():
+                netName = f"net{netId}"
+                netSize = len(edge_indices) * 2  # 每条 edge 提供两个 pin
+                net = Net(netName, len(self.pins), netSize)
+                self.nets[netName] = net
+
+                for e in edge_indices:
+                    src, dst = netData[e]
+                    dx1, dy1, dx2, dy2 = pinData[e]
+
+                    nodeName1 = f"a{src}"
+                    nodeName2 = f"a{dst}"
+
+                    pin1 = Pin(nodeName1, float(dx1) * scale, float(dy1) * scale)
+                    pin2 = Pin(nodeName2, float(dx2) * scale, float(dy2) * scale)
+
+                    self.pins.append(pin1)
+                    self.pins.append(pin2)
+        else:
+            numNets = cond.edge_index.shape[1] // 2
+            netSize = 2  # 目前所有边都是普通边
+            netData = cond.edge_index.T
+            pinData = cond.edge_attr  # edge_attr[e] = [src_dx, src_dy, sink_dx, sink_dy]
+            for netId in range(numNets):
+                netName = f"net{netId}"
+                net = Net(netName, len(self.pins), netSize)
+                self.nets[netName] = net
+                # 两个pin
+                nodeName1 = f"a{netData[netId][0]}"
+                nodeName2 = f"a{netData[netId][1]}"
+                pin1centerX = float(pinData[netId][0]) * scale
+                pin1centerY = float(pinData[netId][1]) * scale
+                pin2centerX = float(pinData[netId][2]) * scale
+                pin2centerY = float(pinData[netId][3]) * scale
+
+                pin1 = Pin(nodeName1, pin1centerX, pin1centerY)
+                pin2 = Pin(nodeName2, pin2centerX, pin2centerY)
+                self.pins.append(pin1)
+                self.pins.append(pin2)
 
 
         

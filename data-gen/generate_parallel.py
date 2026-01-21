@@ -68,14 +68,14 @@ def main(cfg):
     
     while step < num_samples:
         # generate data
-        with mp.Pool(processes=cfg.num_workers) as pool:  
-            sample_batch = pool.map(parallel_gen, range(int(step), int(step) + cfg.print_every), chunksize=1)
+        # with mp.Pool(processes=cfg.num_workers) as pool:  
+        #     sample_batch = pool.map(parallel_gen, range(int(step), int(step) + cfg.print_every), chunksize=1)
         
         # 单个进程
-        # sample_batch = []
-        # for i in range(int(step), int(step) + cfg.print_every):
-        #     sample = generate_sample(circuit_gen, cfg.seed, i)
-        #     sample_batch.append(sample)
+        sample_batch = []
+        for i in range(int(step), int(step) + cfg.print_every):
+            sample = generate_sample(circuit_gen, cfg.seed, i)
+            sample_batch.append(sample)
 
         step.increment(amount = len(sample_batch))
         t_2 = time.time()

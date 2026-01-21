@@ -1,1 +1,4 @@
 PYTHONPATH=. python data-gen/generate_parallel.py versions@_global_=v2 num_train_samples=5000 num_val_samples=2500
+
+python mixedBookshelf.py
+

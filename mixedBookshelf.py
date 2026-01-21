@@ -11,16 +11,18 @@ def load_pickle(path):
         data = pickle.load(f)
     return data
 
+trainSetName = "CircuitGen"
+
 def main():
-    bookshelfDir = "data-gen/outputs/v2.61/bookshelf"
+    bookshelfDir = f"data-gen/outputs/v2.61/{trainSetName}"
     # pyGFile = "data-gen/outputs/v2.61/00000110.pickle"
     fileId = 0
-    for i in range(100, 7501, 100):
+    for i in range(2, 7501, 100):
         pyGFile = f"data-gen/outputs/v2.61/{i:08d}.pickle"
         Logger.printPlace(f"deal with PyG file {pyGFile} ...")
         data = load_pickle(pyGFile)
         for j in range(len(data)):
-            fileName = f"CircuitGen{fileId:04d}"
+            fileName = f"{trainSetName}{fileId:04d}"
             dataBase = DataBase.DataBase()
             dataBase.readpyG(data[j][0],data[j][1])
             auxFile,nodeInThisLayer = dataBase.generateBookShelf(bookshelfDir, fileName, curlayer = -1, moveMacro = True)

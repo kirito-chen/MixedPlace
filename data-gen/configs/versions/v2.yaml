@@ -1,8 +1,8 @@
 dataset_name: v2
 seed: 61
 out_dir: data-gen/outputs
-print_every: 100
-num_workers: 32  # 64
+print_every: 2
+num_workers: 2  # 64
 
 algorithm: v2
 gen_params:
@@ -14,6 +14,7 @@ gen_params:
   # enable_macro_refine: 1
   # refine_ratio: 0.7
   num_clusters: 512
+  random_cell: True
   # ===========================
   stop_density_dist:
     dist_type: uniform
@@ -25,7 +26,12 @@ gen_params:
     dist_type: uniform
     dist_params:
       low: 0.25
-      high: 1.75  # 1.0
+      high: 1.0  # 1.0
+  cell_aspect_ratio_dist:
+    dist_type: uniform
+    dist_params:
+      low: 0.25
+      high: 1.5  # 1.0
   instance_size_dist:
     dist_type: clipped_exp
     dist_params:

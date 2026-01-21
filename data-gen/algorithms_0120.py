@@ -8,8 +8,6 @@ import torch_geometric.utils as tgu
 
 from utils import run_hmetis
 
-import random
-
 class V1:
     def __init__(
             self, 
@@ -271,8 +269,6 @@ class V2:
             max_instance, 
             stop_density_dist,
             max_hard_macros,  # new
-            cell_aspect_ratio_dist,
-            random_cell,
             max_cells,
             num_clusters,
             max_attempts_per_instance,
@@ -303,8 +299,6 @@ class V2:
         self.max_hard_macros = max_hard_macros
         self.max_cells = max_cells
         self.num_clusters = num_clusters
-        self.cell_aspect_ratio_dist = cell_aspect_ratio_dist
-        self.random_cell = random_cell
 
     def sample_old(
             self, 
@@ -398,7 +392,7 @@ class V2:
         return positions, data
     
 
-
+    ## deepseek
     def sample(
         self, 
         size_dist_timer=None, # optional timers
@@ -477,7 +471,7 @@ class V2:
 
         # 放置macro模块
         placement = Placement()   # 负责检查合法性（不重叠、在芯片范围内等）并记录放置好的模块
-        macro_density = 0
+        density = 0
         for i, (x_size, y_size) in enumerate(zip(x_sizes, y_sizes)):
             x_size = float(x_size)
             y_size = float(y_size)
@@ -492,8 +486,8 @@ class V2:
                     is_placed = True
                     break
             if is_placed:
-                macro_density += (x_size * y_size)/4.0  # 将 [-1,1]*[-1,1] 映射到[0,1]*[0,1]
-                if macro_density >= stop_density:
+                density += (x_size * y_size)/4.0  # 将 [-1,1]*[-1,1] 映射到[0,1]*[0,1]
+                if density >= stop_density:
                     break
         
         # 获取已放置的macro数量
@@ -502,228 +496,22 @@ class V2:
         actual_macros = macro_positions.shape[0]
         # print(f"DEBUG: Placed {actual_macros} macros")
         
-        # random_cell = True
-        # 生成cell模块 方式1  随机生成
-        if self.random_cell:
-            # ==================== 生成cell模块 ====================
-            # 计算剩余可用的密度
-            remaining_density = max(0.0, stop_density - macro_density)
-            # print(f"Remaining density for cells: {remaining_density:.4f}")
-            if remaining_density <= 0:
-                remaining_density = 0.1
-            # cell的y_size就是行高
-            cell_y_sizes = torch.full((num_cells,), row_height)
-            # 使用与macro相同的宽高比分布，但可以限制在较小范围
-            cell_aspect_ratio = get_distribution(**self.cell_aspect_ratio_dist).sample((num_cells,))
-            cell_x_sizes = cell_y_sizes * cell_aspect_ratio
-
-            # 随机打乱cell顺序，避免总是保留前面的cell
-            indices = torch.randperm(num_cells)
-            cell_x_sizes = cell_x_sizes[indices]
-            cell_y_sizes = cell_y_sizes[indices]
-
-            # 计算每个cell的密度并累加，直到达到剩余密度
-            cell_density = 0
-            actual_num_cells = 0
-            for i in range(num_cells):
-                cell_area = cell_x_sizes[i] * cell_y_sizes[i]
-                cell_density_increment = cell_area / 4.0
-                
-                if cell_density + cell_density_increment <= remaining_density:
-                    cell_density += cell_density_increment
-                    actual_num_cells += 1
-                else:
-                    # 超过剩余密度，停止添加cell
-                    break
-            # 只保留前actual_num_cells个cell
-            if actual_num_cells > 0:
-                cell_x_sizes = cell_x_sizes[:actual_num_cells]
-                cell_y_sizes = cell_y_sizes[:actual_num_cells]
-                
-                # cell位置在芯片中心附近随机偏移
-                cell_positions = torch.randn((actual_num_cells, 2)) * 0.3
-                cell_positions = torch.clamp(cell_positions, -0.95, 0.95)
-                
-                cell_sizes = torch.stack([cell_x_sizes, cell_y_sizes], dim=1)
-            else:
-                cell_positions = torch.zeros((0, 2))
-                cell_sizes = torch.zeros((0, 2))
-
-            
-            place_timer.stop() if place_timer else None
-
-        else:
-            # 生成cell模块 方式2  生成soft macro用于拆分cel
-            # ==================== 生成soft macro用于拆分cell ====================
-            # 计算剩余可用的密度
-            remaining_density = max(0.0, stop_density - macro_density)
-            print(f"Remaining density for cells: {remaining_density:.4f}")
-            
-            if remaining_density <= 0:
-                print("No remaining density for cells, using random placement")
-                # 如果没有剩余密度，使用随机放置
-                cell_y_sizes = torch.full((num_cells,), row_height)
-                cell_aspect_ratio = get_distribution(**self.cell_aspect_ratio_dist).sample((num_cells,))
-                cell_x_sizes = cell_y_sizes * cell_aspect_ratio
-                cell_positions = torch.randn((num_cells, 2)) * 0.3
-                cell_positions = torch.clamp(cell_positions, -0.95, 0.95)
-            else:
-                # 生成soft macro，每个soft macro将被拆分为多个cell
-                # 估算每个soft macro可以拆分的cell数量
-                # soft macro高度：row_height的3-10倍
-                # cell高度固定为row_height，宽度为row_height的0.25-1.5倍
-                # 平均每个soft macro可拆分出大约 5 * (1.0/0.875) ≈ 5-6个cell
-                
-                # 需要的soft macro数量估算
-                avg_cells_per_soft_macro = 6
-                num_soft_macros_needed = max(1, num_cells // avg_cells_per_soft_macro)
-                num_soft_macros_needed = min(num_soft_macros_needed, 1000)  # 最多1000个soft macro
-                
-                # 生成soft macro尺寸
-                min_soft_multiple = 3
-                max_soft_multiple = 10  # soft macro高度最大为10倍行高
-                
-                soft_multiples = torch.randint(min_soft_multiple, max_soft_multiple + 1, (num_soft_macros_needed,))
-                soft_y_sizes = soft_multiples.float() * row_height
-                
-                # 使用与macro相同的宽高比分布，但可以限制在较小范围
-                soft_aspect_ratio = get_distribution(**self.cell_aspect_ratio_dist).sample((num_soft_macros_needed,))
-                soft_x_sizes = soft_y_sizes * soft_aspect_ratio
-                
-                # 确保soft macro尺寸在合理范围内
-                soft_x_sizes = torch.clamp(soft_x_sizes, 0.01, 1.0)
-                soft_y_sizes = torch.clamp(soft_y_sizes, 0.01, 1.0)
-                
-                # 按面积降序排列
-                soft_areas = soft_x_sizes * soft_y_sizes
-                _, soft_indices = torch.sort(soft_areas, descending=True)
-                soft_x_sizes = soft_x_sizes[soft_indices]
-                soft_y_sizes = soft_y_sizes[soft_indices]
-                
-                # 放置soft macro
-                soft_macro_density = 0
-                soft_macro_positions = []
-                soft_macro_sizes = []
-                soft_macros_placed = 0
-                
-                for i, (x_size, y_size) in enumerate(zip(soft_x_sizes, soft_y_sizes)):
-                    if soft_macro_density >= remaining_density:
-                        break
-                        
-                    x_size = float(x_size)
-                    y_size = float(y_size)
-                    dist_params = {"low": torch.tensor([(x_size/2)-1.0, (y_size/2)-1.0]), 
-                                "high": torch.tensor([1.0-(x_size/2), 1.0-(y_size/2)])}
-                    candidate_dist = get_distribution("uniform", dist_params)
-                    is_placed = False
-                    
-                    for attempt_num in range(self.max_attempts_per_instance):
-                        candidate_pos = candidate_dist.sample()
-                        if placement.check_legality(candidate_pos[0].item(), candidate_pos[1].item(), x_size, y_size):
-                            placement.commit_instance(candidate_pos[0].item(), candidate_pos[1].item(), x_size, y_size)
-                            is_placed = True
-                            soft_macro_positions.append([candidate_pos[0].item(), candidate_pos[1].item()])
-                            soft_macro_sizes.append([x_size, y_size])
-                            soft_macros_placed += 1
-                            break
-                    
-                    if is_placed:
-                        soft_macro_density += (x_size * y_size)/4.0
-                
-                print(f"Placed {soft_macros_placed} soft macros, soft macro density: {soft_macro_density:.4f}")
-                
-                # 将soft macro拆分为cell
-                cell_positions_list = []
-                cell_sizes_list = []
-                cells_generated = 0
-                
-                for soft_idx in range(soft_macros_placed):
-                    if cells_generated >= num_cells:
-                        break
-                        
-                    # 获取soft macro的位置和尺寸
-                    soft_pos = soft_macro_positions[soft_idx]
-                    soft_size = soft_macro_sizes[soft_idx]
-                    soft_x = soft_size[0]
-                    soft_y = soft_size[1]
-                    soft_center_x = soft_pos[0]
-                    soft_center_y = soft_pos[1]
-                    
-                    # 计算soft macro的边界
-                    left = soft_center_x - soft_x/2
-                    right = soft_center_x + soft_x/2
-                    bottom = soft_center_y - soft_y/2
-                    top = soft_center_y + soft_y/2
-                    
-                    # 将soft macro按行拆分为cell
-                    # 每行高度为row_height
-                    num_rows_in_soft = int(soft_y / row_height)
-                    if num_rows_in_soft < 1:
-                        num_rows_in_soft = 1
-                    
-                    for row_idx in range(num_rows_in_soft):
-                        if cells_generated >= num_cells:
-                            break
-                            
-                        # 计算该行的y坐标范围
-                        row_bottom = bottom + row_idx * row_height
-                        row_top = row_bottom + row_height
-                        
-                        # 计算该行的y中心
-                        row_center_y = (row_bottom + row_top) / 2
-                        
-                        # 将该行按cell宽度拆分为多个cell
-                        current_x = left
-                        while current_x < right and cells_generated < num_cells:
-                            # 随机生成cell宽度（row_height的0.25到1.5倍）
-                            cell_width = row_height * (torch.rand(1).item() * (1.5 - 0.25) + 0.25)
-                            
-                            # 如果剩余空间不够放一个cell，调整最后一个cell的宽度
-                            if current_x + cell_width > right:
-                                cell_width = right - current_x
-                            
-                            # 确保cell宽度不小于最小宽度
-                            min_cell_width = row_height * 0.25
-                            if cell_width < min_cell_width and current_x > left:
-                                # 如果cell太小，合并到前一个cell（这里简化处理，跳过）
-                                break
-                            
-                            # 计算cell的x中心
-                            cell_center_x = current_x + cell_width/2
-                            
-                            # 记录cell的位置和尺寸
-                            cell_positions_list.append([cell_center_x, row_center_y])
-                            cell_sizes_list.append([cell_width, row_height])
-                            
-                            # 更新当前位置和cell计数器
-                            current_x += cell_width
-                            cells_generated += 1
-                
-                # 如果生成的cell数量不足，补充一些随机cell
-                # if len(cell_positions_list) < num_cells:
-                #     additional_cells = num_cells - len(cell_positions_list)
-                #     print(f"Adding {additional_cells} additional random cells")
-                    
-                #     for _ in range(additional_cells):
-                #         # 随机生成cell位置（在芯片范围内）
-                #         cell_pos = torch.rand(2) * 2 - 1  # [-1, 1]
-                #         cell_pos = torch.clamp(cell_pos, -0.95, 0.95)
-                        
-                #         # 随机生成cell宽度
-                #         cell_width = row_height * (torch.rand(1).item() * (1.5 - 0.25) + 0.25)
-                        
-                #         cell_positions_list.append(cell_pos.tolist())
-                #         cell_sizes_list.append([cell_width, row_height])
-                
-                # 转换为tensor
-                cell_positions = torch.tensor(cell_positions_list, dtype=torch.float32)[:num_cells]
-                cell_sizes = torch.tensor(cell_sizes_list, dtype=torch.float32)[:num_cells]
-    
+        # ==================== 生成cell模块 ====================
+        # cell的y_size就是行高
+        cell_y_sizes = torch.full((num_cells,), row_height)
+        # 使用与macro相同的宽高比分布，但可以限制在较小范围
+        cell_aspect_ratio = get_distribution(**self.aspect_ratio_dist).sample((num_cells,))
+        cell_x_sizes = cell_y_sizes * cell_aspect_ratio
+        
+        # cell位置在芯片中心附近随机偏移
+        cell_positions = torch.randn((num_cells, 2)) * 0.3
+        cell_positions = torch.clamp(cell_positions, -0.95, 0.95)
+        
+        place_timer.stop() if place_timer else None
         
         # ==================== 合并所有模块 ====================
         all_positions = torch.cat([macro_positions, cell_positions], dim=0)
-        # all_sizes = torch.cat([macro_sizes, torch.stack([cell_x_sizes, cell_y_sizes], dim=1)], dim=0)
-        all_sizes = torch.cat([macro_sizes, cell_sizes], dim=0)
+        all_sizes = torch.cat([macro_sizes, torch.stack([cell_x_sizes, cell_y_sizes], dim=1)], dim=0)
         num_instances = all_positions.shape[0]
         
         
@@ -788,8 +576,8 @@ class V2:
         # print(f"DEBUG: Total valid terminals: {num_valid_terminals}")
         
         # 2. 确定要生成的边数
-        min_edges = int(num_cells * 1.5)
-        max_edges = int(num_cells * 1.8)
+        min_edges = num_cells
+        max_edges = int(num_cells * 1.2)
         target_edges = torch.randint(min_edges, max_edges + 1, (1,)).item()
         
         
@@ -816,43 +604,12 @@ class V2:
         current_edges = len(edges)
         if target_edges > current_edges:
             additional_edges_needed = target_edges - current_edges
-            
-            # 将终端分为macro终端和cell终端
-            macro_terminals = []
-            cell_terminals = []
-            
-            for idx, (v, t) in enumerate(valid_terminals):
-                if v < actual_macros:  # 前actual_macros个是macro
-                    macro_terminals.append(idx)
-                else:
-                    cell_terminals.append(idx)
-            
-            num_macro_terminals = len(macro_terminals)
-            num_cell_terminals = len(cell_terminals)
-            
-            # 设置选择权重：macro终端的权重更高
-            # 例如，使选择macro的概率是选择cell的3倍
-            macro_weight = 0.75  # 75%的概率选择macro作为源
-            cell_weight = 0.25   # 25%的概率选择cell作为源
-            
             for _ in range(additional_edges_needed):
-                # 随机选择源终端，倾向于选择macro
-                rand_val = torch.rand(1).item()
-                
-                if rand_val < macro_weight and macro_terminals:
-                    # 从macro终端中选择
-                    src_idx = random.choice(macro_terminals)
-                elif cell_terminals:
-                    # 从cell终端中选择
-                    src_idx = random.choice(cell_terminals)
-                else:
-                    # 如果没有cell终端，从macro中选择
-                    src_idx = random.choice(macro_terminals) if macro_terminals else 0
-                
+                # 随机选择源终端
+                src_idx = torch.randint(0, num_valid_terminals, (1,)).item()
                 src_v, src_t = valid_terminals[src_idx]
                 
                 # 随机选择目标终端（不能是同一个模块）
-                # 目标终端的选择保持均匀分布
                 target_idx = torch.randint(0, num_valid_terminals, (1,)).item()
                 target_v, target_t = valid_terminals[target_idx]
                 
@@ -883,14 +640,10 @@ class V2:
         edge_attr_reverse = torch.cat([edge_attr_sink, edge_attr_source], dim=1)  # (E, 4)
         edge_attr = torch.cat([edge_attr_forward, edge_attr_reverse], dim=0)
         
+        # 6. 标记源/汇（简化处理，随机分配）
+        # 这里简化处理，不严格区分源和汇
         
         edge_timer.stop() if edge_timer else None
-
-        # 生成超边 edge_pin_id
-        # 2. 确定要生成的边数
-
-        target_super_edges = int(len(edges) / 1.5)
-        edge_pin_id = self.generate_list(target_super_edges, len(edges))
 
         if False:
             # ==================== 聚类cell ====================
@@ -1106,36 +859,10 @@ class V2:
         # if self.zero_edge_attr:
         #     edge_attr = 0 * edge_attr
         
-        data = Data(x=all_sizes, edge_index=edge_index, edge_attr=edge_attr, is_macros= is_macros, is_ports=mask, edge_pin_id = edge_pin_id, numRow = num_rows)
+        data = Data(x=all_sizes, edge_index=edge_index, edge_attr=edge_attr, is_macros= is_macros, is_ports=mask, numRow = num_rows)
         # print("==============================")
         # plot_sample(all_positions, data, f"data-gen/outputs/v2.61/pic/case_{idx}")
         return all_positions, data
-    
-
-    def generate_list(self, k, n, seed=None):
-        assert n >= k, "n 必须 >= k，否则无法保证每个数至少出现一次"
-        
-        if seed is not None:
-            random.seed(seed)
-
-        # Step 1: 每个数至少一次
-        result = list(range(k))
-        extra = n - k
-
-        # Step 2: 尽量让每个数出现两次
-        indices = list(range(k))
-        random.shuffle(indices)
-
-        i = 0
-        while extra > 0:
-            result.append(indices[i % k])
-            i += 1
-            extra -= 1
-
-        # Step 3: 打乱顺序
-        # random.shuffle(result)
-        return result
-
 
     def get_terminal_offsets(self, x_sizes, y_sizes, max_num_terminals, reference="center"):
         # NOTE here we assume reference point (for computing offset) is center of instance
