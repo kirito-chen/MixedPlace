@@ -278,7 +278,8 @@ class DataBase:
                 if line.strip() == "":
                     continue
                 words = line.strip().split()
-                if words[0] == "NumRows":
+
+                if words[0] == "NumRows" or words[0] == "Numrows": 
                     self.numRows = int(words[2])
                     for i in range(self.numRows):
                         subrowOrigin,numSites,coordinate,height = 0,0,0,0
@@ -314,6 +315,7 @@ class DataBase:
                     self.dieWidth = self.xh - self.xl
                     self.dieHeight = self.numRows * self.rowHeight
                     self.yh = self.dieHeight + self.yl
+                    print(f"self.dieWidth:{self.dieWidth} self.dieHeight:{self.dieHeight}")
                     break
                            
     def generateJson(self, outputDir, fileName, auxPath, resultDir, numLayer, curlayer = -1, gpu = 0, gp = 0, lg = 1, dp = 1,
@@ -1942,11 +1944,14 @@ class DataBase:
     def readpyG(self, x, cond):
         
         ##### 超参数
-        is_hyper_edge = True
+        is_hyper_edge = False
 
         # 缩放比例， [-1, 1] * [-1 , 1] 缩放到rowheight为16
-        rowNum = cond.numRow
-        rowheight = 2 / rowNum
+        rowheight = cond.x[:, 1].min()
+        rowheight = rowheight.item()
+        rowNum = int(2 / rowheight)
+        # rowNum = cond.numRow
+        # rowheight = 2 / rowNum
         ROWHEIGHTTRUE = 16
         scale = ROWHEIGHTTRUE / rowheight
         
@@ -1961,12 +1966,15 @@ class DataBase:
             nodeName = f"a{id}"
             x_size = round(cond.x[id][0].item() * scale)
             y_size = round(cond.x[id][1].item() * scale)
-            node = Node(nodeName, x_size, y_size, "terminal" if cond.is_macros[id] or cond.is_ports[id] else None)
+            node = Node(nodeName, x_size, y_size, "terminal" if (hasattr(cond, "is_macros") and cond.is_macros[id])\
+                         or (hasattr(cond, "is_ports") and cond.is_ports[id] ) else None) 
             xx = (x[id][0] + 1) * scale  # +1是为了将坐标轴变成左下角
             yy = (x[id][1] + 1) * scale
-            node.update(xx, yy, "N", "/FIXED" if cond.is_macros[id] or cond.is_ports[id] else None)
+            node.update(xx, yy, "N", "/FIXED" if (hasattr(cond, "is_macros") and cond.is_macros[id])\
+                         or (hasattr(cond, "is_ports") and cond.is_ports[id] ) else None) 
             self.nodes[nodeName] = node
-            if cond.is_macros[id] or cond.is_ports[id]:
+            if (hasattr(cond, "is_macros") and cond.is_macros[id])\
+                or (hasattr(cond, "is_ports") and cond.is_ports[id] ):
                 self.macros[id] = node
         # net  目前的net都是无向边
         if is_hyper_edge: #cond.edge_pin_id:

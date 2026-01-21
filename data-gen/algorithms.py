@@ -7,6 +7,7 @@ from torch_geometric.data import Data
 import torch_geometric.utils as tgu
 
 from utils import run_hmetis
+from torch_cluster import radius_graph
 
 import random
 
@@ -271,9 +272,11 @@ class V2:
             max_instance, 
             stop_density_dist,
             max_hard_macros,  # new
+            min_hard_macros,
             cell_aspect_ratio_dist,
             random_cell,
             max_cells,
+            min_cells,
             num_clusters,
             max_attempts_per_instance,
             aspect_ratio_dist, 
@@ -301,7 +304,9 @@ class V2:
 
         # new
         self.max_hard_macros = max_hard_macros
+        self.min_hard_macros = min_hard_macros
         self.max_cells = max_cells
+        self.min_cells = min_cells
         self.num_clusters = num_clusters
         self.cell_aspect_ratio_dist = cell_aspect_ratio_dist
         self.random_cell = random_cell
@@ -410,7 +415,7 @@ class V2:
         size_dist_timer.start() if size_dist_timer else None
 
         # Generate stop density
-        stop_density = get_distribution(**self.stop_density_dist).sample()  # 均匀分布 [0.75, 0.9]
+        stop_density = get_distribution(**self.stop_density_dist).sample()  # 均匀分布 [0.75, 0.85]
 
         # ==================== 采样行数 ====================
         # 在100-500中采样行数
@@ -419,10 +424,10 @@ class V2:
 
         # ==================== 采样macro和cell数量 ====================
         # macro数量在一定范围内随机
-        num_macros = torch.randint(150, self.max_hard_macros, (1,)).item()  # 50-150 个macro
+        num_macros = torch.randint(self.min_hard_macros, self.max_hard_macros, (1,)).item()  # 50-150 个macro
 
         # cell数量在一定范围内随机
-        num_cells = torch.randint(80000, self.max_cells, (1,)).item()  # 80000-210000 个cell
+        num_cells = torch.randint(self.min_cells, self.max_cells, (1,)).item()  # 80000-210000 个cell
 
         # print(f"DEBUG: Rows: {num_rows}, Row height: {row_height:.4f}")
         # print(f"DEBUG: Macros: {num_macros}, Cells: {num_cells}")
@@ -697,22 +702,6 @@ class V2:
                             current_x += cell_width
                             cells_generated += 1
                 
-                # 如果生成的cell数量不足，补充一些随机cell
-                # if len(cell_positions_list) < num_cells:
-                #     additional_cells = num_cells - len(cell_positions_list)
-                #     print(f"Adding {additional_cells} additional random cells")
-                    
-                #     for _ in range(additional_cells):
-                #         # 随机生成cell位置（在芯片范围内）
-                #         cell_pos = torch.rand(2) * 2 - 1  # [-1, 1]
-                #         cell_pos = torch.clamp(cell_pos, -0.95, 0.95)
-                        
-                #         # 随机生成cell宽度
-                #         cell_width = row_height * (torch.rand(1).item() * (1.5 - 0.25) + 0.25)
-                        
-                #         cell_positions_list.append(cell_pos.tolist())
-                #         cell_sizes_list.append([cell_width, row_height])
-                
                 # 转换为tensor
                 cell_positions = torch.tensor(cell_positions_list, dtype=torch.float32)[:num_cells]
                 cell_sizes = torch.tensor(cell_sizes_list, dtype=torch.float32)[:num_cells]
@@ -723,516 +712,131 @@ class V2:
         # all_sizes = torch.cat([macro_sizes, torch.stack([cell_x_sizes, cell_y_sizes], dim=1)], dim=0)
         all_sizes = torch.cat([macro_sizes, cell_sizes], dim=0)
         num_instances = all_positions.shape[0]
-        
+        # print(f"num_instances:{num_instances}")
         
         
         # ==================== 生成terminal（引脚） ====================
         # 简化：所有cell都生成4为标准差的terminal
         terminal_timer.start() if terminal_timer else None
 
-        # 计算所有模块的面积
+        # sample number of terminals
         instance_area = all_sizes[:, 0] * all_sizes[:, 1]
-
-        # 创建terminal数量数组
-        num_terminals_list = []
-
-        # 为macro生成terminal数量（使用原有的面积相关分布）
-        if actual_macros > 0:
-            # 提取macro的面积
-            macro_areas = instance_area[:actual_macros]
-            # 使用原有的分布生成macro引脚数
-            macro_num_terminals = get_distribution(**self.num_terminals_dist).sample(macro_areas).int()
-            # 限制在合理范围内
-            macro_num_terminals = torch.clip(macro_num_terminals, min=1, max=100)
-            num_terminals_list.extend(macro_num_terminals.tolist())
-
-        # 为cell生成terminal数量（正态分布，标准差为4）
-        mean_terminals_cell = 4  # cell平均引脚数
-        std_terminals_cell = 2   # cell引脚数标准差
-
-        for i in range(actual_macros, num_instances):
-            # cell: 使用正态分布生成引脚数
-            # 生成正态分布随机数，然后四舍五入取整
-            num_term_float = torch.randn(1) * std_terminals_cell + mean_terminals_cell
-            num_term = int(torch.round(num_term_float).item())
-            # 确保引脚数在合理范围内（1到20之间）
-            num_term = max(1, min(num_term, 20))
-            num_terminals_list.append(num_term)
-        
-        num_terminals = torch.tensor(num_terminals_list, dtype=torch.long)
+        num_terminals = get_distribution(**self.num_terminals_dist).sample(instance_area).int() # 面积越大越有概率产生更多的引脚
+        # num_terminals = torch.clip(num_terminals, min=1, max=32)
+        num_terminals = torch.clip(num_terminals, min=1, max=256) # This is what it should be
         max_num_terminals = torch.max(num_terminals)
-        
-        # print(f"DEBUG: Macro terminals range: using area-based distribution")
-        # print(f"DEBUG: Cell terminals: mean={mean_terminals_cell}, std={std_terminals_cell}")
-        # print(f"DEBUG: Max terminals: {max_num_terminals.item()}")
-        
-        # 获取terminal offsets
-        terminal_offsets = self.get_terminal_offsets(all_sizes[:,0], all_sizes[:,1], 
-                                                    max_num_terminals, reference="center")
-        
+        # print(f"max_num_terminals:{max_num_terminals}")
+        terminal_offsets = self.get_terminal_offsets(all_sizes[:,0], all_sizes[:,1], max_num_terminals, reference="center") # 每个模块都产生了 max_num_terminals 的pin
+
         terminal_timer.stop() if terminal_timer else None
         edge_timer.start() if edge_timer else None
-        
-        # ==================== 生成net（超边结构） ====================
-        # 按照网表规则生成超边：macro与多个cell相连，形成超边
-        
-        # 1. 创建有效终端列表
-        valid_terminals = []
-        for v in range(num_instances):
-            for t in range(num_terminals[v]):
-                valid_terminals.append((v, t))
-        
-        num_valid_terminals = len(valid_terminals)
-        # print(f"Total valid terminals: {num_valid_terminals}")
-        
-        # 2. 生成超边
-        # 网表规则：每个超边通常由一个macro连接到多个cell
-        # 少数超边连接多个macro或多个cell
-        
-        edges = []  # 存储普通边
-        edge_pin_ids = []  # 存储每条边所属的超边ID
-        hyperedge_id = 0
-        
-        # 首先，为每个macro生成主要超边（连接到多个cell）
-        # 每个macro至少有一个超边
-        for macro_idx in range(actual_macros):
-            if num_terminals[macro_idx] == 0:
-                continue
-                
-            # 确定这个macro的超边数量（1-3个）
-            num_hyperedges_for_macro = torch.randint(1, 4, (1,)).item()
-            
-            for h in range(num_hyperedges_for_macro):
-                # 确定超边大小（连接到这个macro的cell数量）
-                # 大多数超边连接2-5个cell，少数连接更多
-                rand_val = torch.rand(1).item()
-                if rand_val < 0.8:
-                    num_cells_in_hyperedge = torch.randint(2, 6, (1,)).item()  # 2-5个cell
-                elif rand_val < 0.95:
-                    num_cells_in_hyperedge = torch.randint(5, 15, (1,)).item()  # 5-14个cell
-                else:
-                    num_cells_in_hyperedge = torch.randint(15, 30, (1,)).item()  # 15-29个cell
-                
-                # 确保不超过可用的cell数量
-                available_cells = num_instances - actual_macros
-                if available_cells < num_cells_in_hyperedge:
-                    num_cells_in_hyperedge = max(1, available_cells)
-                
-                # 随机选择cell
-                cell_indices = torch.randint(actual_macros, num_instances, (num_cells_in_hyperedge,))
-                cell_indices = torch.unique(cell_indices)  # 去重
-                
-                # 为macro选择一个引脚
-                if num_terminals[macro_idx] > 0:
-                    macro_pin = torch.randint(0, num_terminals[macro_idx], (1,)).item()
-                else:
-                    continue
-                
-                # 为每个选中的cell生成连接到macro的边
-                for cell_idx in cell_indices:
-                    if num_terminals[cell_idx] > 0:
-                        # 为cell选择一个引脚
-                        cell_pin = torch.randint(0, num_terminals[cell_idx], (1,)).item()
-                        
-                        # 添加边：macro -> cell
-                        edges.append((macro_idx, macro_pin, cell_idx, cell_pin))
-                        edge_pin_ids.append(hyperedge_id)
-                        
-                        # 也可以添加反向边（如果需要无向图）
-                        # edges.append((cell_idx, cell_pin, macro_idx, macro_pin))
-                        # edge_pin_ids.append(hyperedge_id)
-                
-                hyperedge_id += 1
-        
-        # 其次，生成cell之间的超边（cell-to-cell超边）
-        # 这些超边通常较小，大部分只连接2个cell
-        num_cell_hyperedges = torch.randint(num_cells // 10, num_cells // 5, (1,)).item()
-        
-        for h in range(num_cell_hyperedges):
-            # 确定超边大小（连接多少cell）
-            rand_val = torch.rand(1).item()
-            if rand_val < 0.9:
-                hyperedge_size = torch.randint(1, 3, (1,)).item()  # 90%的cell超边只连接1-2个cellpyt
-            elif rand_val < 0.98:
-                hyperedge_size = torch.randint(3, 6, (1,)).item()  # 8%连接3-5个cell
-            else:
-                hyperedge_size = torch.randint(5, 10, (1,)).item()  # 2%连接5-9个cell
-            
-            # 随机选择cell
-            cell_indices = torch.randint(actual_macros, num_instances, (hyperedge_size,))
-            cell_indices = torch.unique(cell_indices)
-            
-            # 如果只有1个或0个有效cell，跳过
-            if len(cell_indices) < 2:
-                continue
-            
-            # 为超边生成连接（生成树或完全连接）
-            # 对于小超边（≤3），生成完全连接；对于大超边，生成树形连接
-            if len(cell_indices) <= 3:
-                # 完全连接
-                for i in range(len(cell_indices)):
-                    for j in range(i+1, len(cell_indices)):
-                        cell1 = cell_indices[i].item()
-                        cell2 = cell_indices[j].item()
-                        
-                        if num_terminals[cell1] > 0 and num_terminals[cell2] > 0:
-                            pin1 = torch.randint(0, num_terminals[cell1], (1,)).item()
-                            pin2 = torch.randint(0, num_terminals[cell2], (1,)).item()
-                            
-                            edges.append((cell1, pin1, cell2, pin2))
-                            edge_pin_ids.append(hyperedge_id)
-            else:
-                # 树形连接：随机生成一个生成树
-                shuffled_cells = cell_indices[torch.randperm(len(cell_indices))]
-                connected_cells = [shuffled_cells[0].item()]
-                
-                for i in range(1, len(shuffled_cells)):
-                    new_cell = shuffled_cells[i].item()
-                    # 随机选择一个已连接的cell
-                    connect_cell = random.choice(connected_cells)
-                    
-                    if num_terminals[new_cell] > 0 and num_terminals[connect_cell] > 0:
-                        pin1 = torch.randint(0, num_terminals[new_cell], (1,)).item()
-                        pin2 = torch.randint(0, num_terminals[connect_cell], (1,)).item()
-                        
-                        edges.append((connect_cell, pin2, new_cell, pin1))
-                        edge_pin_ids.append(hyperedge_id)
-                        
-                    connected_cells.append(new_cell)
-            
-            hyperedge_id += 1
-        
-        # 最后，生成macro-to-macro超边（较少）
-        if actual_macros >= 2:
-            num_macro_hyperedges = torch.randint(actual_macros // 5, actual_macros // 2, (1,)).item()
-            
-            for h in range(num_macro_hyperedges):
-                # macro超边通常较小，连接2-3个macro
-                hyperedge_size = torch.randint(2, min(4, actual_macros+1), (1,)).item()
-                
-                # 随机选择macro
-                macro_indices = torch.randint(0, actual_macros, (hyperedge_size,))
-                macro_indices = torch.unique(macro_indices)
-                
-                if len(macro_indices) < 2:
-                    continue
-                
-                # 生成完全连接（macro超边通常较小）
-                for i in range(len(macro_indices)):
-                    for j in range(i+1, len(macro_indices)):
-                        macro1 = macro_indices[i].item()
-                        macro2 = macro_indices[j].item()
-                        
-                        if num_terminals[macro1] > 0 and num_terminals[macro2] > 0:
-                            pin1 = torch.randint(0, num_terminals[macro1], (1,)).item()
-                            pin2 = torch.randint(0, num_terminals[macro2], (1,)).item()
-                            
-                            edges.append((macro1, pin1, macro2, pin2))
-                            edge_pin_ids.append(hyperedge_id)
-                
-                hyperedge_id += 1
-        
-        # print(f"Generated {len(edges)} ordinary edges from {hyperedge_id} hyperedges")
-        
-        # 3. 确保边数达到目标
-        min_edges = int(num_instances * 1.5)
-        max_edges = int(num_instances * 1.8)
-        target_edges = torch.randint(min_edges, max_edges + 1, (1,)).item()
-        
-        current_edges = len(edges)
-        if current_edges < target_edges:
-            # 添加额外的随机边以达到目标
-            additional_edges_needed = target_edges - current_edges
-            # print(f"Adding {additional_edges_needed} additional random edges")
-            
-            # 将终端分为macro终端和cell终端
-            macro_terminals = []
-            cell_terminals = []
-            
-            for idx, (v, t) in enumerate(valid_terminals):
-                if v < actual_macros:
-                    macro_terminals.append(idx)
-                else:
-                    cell_terminals.append(idx)
-            
-            num_macro_terminals = len(macro_terminals)
-            num_cell_terminals = len(cell_terminals)
-            
-            # 设置选择权重
-            src_macro_weight = 0.75  # 75%的概率选择macro作为源
-            
-            for _ in range(additional_edges_needed):
-                # 随机选择源终端，倾向于选择macro
-                rand_val = torch.rand(1).item()
-                
-                if rand_val < src_macro_weight and macro_terminals:
-                    src_idx = random.choice(macro_terminals)
-                elif cell_terminals:
-                    src_idx = random.choice(cell_terminals)
-                else:
-                    src_idx = random.choice(macro_terminals) if macro_terminals else 0
-                
-                src_v, src_t = valid_terminals[src_idx]
-                
-                # 随机选择目标终端
-                target_idx = torch.randint(0, num_valid_terminals, (1,)).item()
-                target_v, target_t = valid_terminals[target_idx]
-                
-                # 避免自环
-                if src_v != target_v:
-                    edges.append((src_v, src_t, target_v, target_t))
-                    edge_pin_ids.append(hyperedge_id)
-                    hyperedge_id += 1
-        
-        # 4. 转换为edge_exists矩阵（稀疏表示）
-        if edges:
-            edges_tensor = torch.tensor(edges, dtype=torch.long)  # (E, 4)
-            edge_pin_ids_tensor = torch.tensor(edge_pin_ids, dtype=torch.long)  # (E,)
-        else:
-            edges_tensor = torch.zeros((0, 4), dtype=torch.long)
-            edge_pin_ids_tensor = torch.zeros((0,), dtype=torch.long)
-        
-        # 5. 生成edge_index和edge_attr
-        edge_index_forward = edges_tensor[:, [0, 2]].t()  # (2, E)
-        edge_index_reverse = edges_tensor[:, [2, 0]].t()  # (2, E)
-        edge_index = torch.cat([edge_index_forward, edge_index_reverse], dim=1)
-        
-        # 生成edge_attr
-        edge_attr_source = terminal_offsets[edges_tensor[:, 0], edges_tensor[:, 1]]  # (E, 2)
-        edge_attr_sink = terminal_offsets[edges_tensor[:, 2], edges_tensor[:, 3]]    # (E, 2)
-        edge_attr_forward = torch.cat([edge_attr_source, edge_attr_sink], dim=1)  # (E, 4)
-        edge_attr_reverse = torch.cat([edge_attr_sink, edge_attr_source], dim=1)  # (E, 4)
-        edge_attr = torch.cat([edge_attr_forward, edge_attr_reverse], dim=0)
-        
-        # 创建对应的edge_pin_id（双向边属于同一个超边）
-        edge_pin_ids_forward = edge_pin_ids_tensor
-        edge_pin_ids_reverse = edge_pin_ids_tensor
-        edge_pin_ids = torch.cat([edge_pin_ids_forward, edge_pin_ids_reverse], dim=0)
-        
-        # 统计超边信息
-        if edge_pin_ids_tensor.numel() > 0:
-            unique_hyperedge_ids = torch.unique(edge_pin_ids_tensor)
-            hyperedge_size_stats = {}
-            for hid in unique_hyperedge_ids:
-                count = (edge_pin_ids_tensor == hid).sum().item()
-                hyperedge_size_stats[count] = hyperedge_size_stats.get(count, 0) + 1
-            
-            # print(f"Hyperedge size distribution: {sorted(hyperedge_size_stats.items())}")
 
-        if False:
-            # ==================== 聚类cell ====================
-            print("DEBUG: Starting cell clustering...")
-            try:
-                # 准备数据用于聚类
-                # 只对cell进行聚类
-                cell_start_idx = actual_macros
-                cell_end_idx = actual_macros + num_cells
-                
-                # 获取cell的位置和尺寸
-                cell_positions = all_positions[cell_start_idx:cell_end_idx]
-                cell_sizes = all_sizes[cell_start_idx:cell_end_idx]
-                cell_sizes = all_sizes
-                
-                # # 创建cell的Data对象，只包含cell之间的边
-                cell_edge_mask = (edge_index[0] >= cell_start_idx) & (edge_index[0] < cell_end_idx) & \
-                                (edge_index[1] >= cell_start_idx) & (edge_index[1] < cell_end_idx)
-                cell_edge_index = edge_index[:, cell_edge_mask]
-                
-                # # 重新索引cell的边，使其从0开始
-                cell_edge_index = cell_edge_index - cell_start_idx
-                
-                # 创建cell的Data对象
-                # macro_mask = torch.ones(actual_macros, dtype=torch.bool)
-                # cell_mask = torch.zeros(num_cells, dtype=torch.bool)
-                # mask = torch.cat([macro_mask, cell_mask], dim=0)
-                # is_macros = torch.cat([torch.ones(actual_macros, dtype=torch.bool), torch.zeros(num_cells, dtype=torch.bool)], dim=0)
-                # cell_data = Data(x=all_sizes, edge_index=edge_index, edge_attr=edge_attr, is_macros = is_macros, is_ports=mask)
-                
-                # 设置聚类参数
-                num_clusters = self.num_clusters
-                ubfactor = 5
-                
-                print(f"Clustering {num_cells} cells into {num_clusters} clusters...")
-                
-                try:
-                    assigned_parts = run_hmetis(
-                        input_cond=cell_data,
-                        num_clusters=num_clusters,
-                        algorithm="hmetis",
-                        ubfactor=ubfactor,
-                        temp_dir="logs/temp",
-                        verbose=False
-                    )
-                    
-                    # 将聚类结果转换为tensor
-                    cell_clusters = torch.tensor(assigned_parts, dtype=torch.long)
-                    
-                    # 统计每个cluster的大小
-                    unique_clusters, cluster_counts = torch.unique(cell_clusters, return_counts=True)
-                    print(f"Clustering completed. Cluster sizes: min={cluster_counts.min().item()}, max={cluster_counts.max().item()}, mean={cluster_counts.float().mean().item():.1f}")
-                    
-                except Exception as e:
-                    print(f"Hmetis clustering failed: {e}")
-                    print("Using random clustering as fallback...")
-                    cell_clusters = torch.randint(0, num_clusters, (num_cells,))
-                    
-            except Exception as e:
-                print(f"Error during clustering: {e}")
-                print("Using random clustering as fallback...")
-                cell_clusters = torch.randint(0, 512, (num_cells,))
-            
-            # ==================== 生成聚类后的数据（包含hard_macro） ====================
-            
-            # 为每个cluster创建数据
-            cluster_positions = []
-            cluster_sizes = []
-            
-            # 计算每个cluster的位置和尺寸
-            for cluster_id in range(self.num_clusters):
-                # 获取属于该cluster的所有cell的索引
-                cluster_cell_indices = torch.where(cell_clusters == cluster_id)[0]
-                num_cells_in_cluster = len(cluster_cell_indices)
-                
-                if num_cells_in_cluster > 0:
-                    # 计算cluster的质心位置
-                    cluster_cells_positions = cell_positions[cluster_cell_indices]
-                    centroid = cluster_cells_positions.mean(dim=0)
-                    
-                    # 计算cluster的总面积（所有cell的面积之和）
-                    cluster_cells_sizes = cell_sizes[cluster_cell_indices]
-                    total_area = (cluster_cells_sizes[:, 0] * cluster_cells_sizes[:, 1]).sum()
-                    
-                    # 将总面积转换为一个合理的尺寸（假设为正方形）
-                    side_length = torch.sqrt(total_area).item()
-                    cluster_x_size = min(side_length, 0.3)  # 限制最大尺寸
-                    cluster_y_size = min(side_length, 0.3)
-                    
-                    # 如果cluster很小，设置最小尺寸
-                    if cluster_x_size < 0.01:
-                        cluster_x_size = 0.01
-                    if cluster_y_size < 0.01:
-                        cluster_y_size = 0.01
-                    
-                    cluster_positions.append(centroid)
-                    cluster_sizes.append([cluster_x_size, cluster_y_size])
-                else:
-                    # 如果cluster为空，创建一个小型虚拟cluster
-                    centroid = torch.rand(2) * 0.2 - 0.1  # 在中心附近随机位置
-                    cluster_positions.append(centroid)
-                    cluster_sizes.append([0.01, 0.01])
-            
-            # 转换为tensor
-            if cluster_positions:
-                cluster_positions = torch.stack(cluster_positions)
-                cluster_sizes = torch.tensor(cluster_sizes, dtype=torch.float32)
-            else:
-                cluster_positions = torch.zeros((0, 2))
-                cluster_sizes = torch.zeros((0, 2))
-            
-            # ==================== 创建cluster_map（原始id到聚类后id的映射） ====================
-            # cluster_map的形状为[num_instances]，其中：
-            # - 对于hard_macro: 映射到自身的id (0 到 actual_macros-1)
-            # - 对于cell: 映射到 cluster_id + actual_macros (即从actual_macros开始)
-            cluster_map = torch.full((num_instances,), -1, dtype=torch.long)
-            
-            # hard_macro映射到自身
-            for i in range(actual_macros):
-                cluster_map[i] = i
-            
-            # cell映射到cluster_id + actual_macros
-            for i in range(num_cells):
-                cell_global_idx = actual_macros + i
-                cluster_map[cell_global_idx] = actual_macros + cell_clusters[i].item()
-            
-            # ==================== 创建cluster_data的边连接 ====================
-            # 将原始边映射到聚类后的模块
-            cluster_edges = []
-            
-            # 遍历所有原始边
-            for i in range(edge_index.shape[1]):
-                src_idx = edge_index[0, i].item()
-                tgt_idx = edge_index[1, i].item()
-                
-                # 通过cluster_map映射到新的索引
-                new_src_idx = cluster_map[src_idx]
-                new_tgt_idx = cluster_map[tgt_idx]
-                
-                # 避免自环
-                if new_src_idx != new_tgt_idx:
-                    cluster_edges.append([new_src_idx, new_tgt_idx])
-            
-            # 转换为edge_index格式并去重（因为多个cell到同一个cluster的边会重复）
-            if cluster_edges:
-                cluster_edge_tensor = torch.tensor(cluster_edges, dtype=torch.long).t()
-                
-                # 去重：将边排序并去除重复
-                # 先将边排序，使src <= tgt
-                sorted_edges = torch.stack([torch.min(cluster_edge_tensor, dim=0)[0],
-                                        torch.max(cluster_edge_tensor, dim=0)[0]])
-                
-                # 去除重复边
-                unique_edges = torch.unique(sorted_edges, dim=1)
-                
-                # 恢复双向边（无向图需要两个方向）
-                forward_edges = unique_edges
-                reverse_edges = torch.stack([unique_edges[1], unique_edges[0]])
-                cluster_edge_index = torch.cat([forward_edges, reverse_edges], dim=1)
-            else:
-                cluster_edge_index = torch.zeros((2, 0), dtype=torch.long)
-            
-            # ==================== 创建cluster_data ====================
-            # 合并macro和cluster的位置和尺寸
-            cluster_all_positions = torch.cat([macro_positions, cluster_positions], dim=0)
-            cluster_all_sizes = torch.cat([macro_sizes, cluster_sizes], dim=0)
-            
-            # 创建cluster的terminal（只在中心位置）
-            # 所有模块（macro和cluster）都只有一个terminal在中心
-            cluster_num_modules = cluster_all_positions.shape[0]
-            
-            # 创建cluster的edge_attr（都是0，因为terminal在中心）
-            cluster_edge_attr = torch.zeros((cluster_edge_index.shape[1], 4))
-            
-            # 创建cluster的mask：macro为True，cluster为False
-            cluster_macro_mask = torch.ones(actual_macros, dtype=torch.bool)
-            cluster_cluster_mask = torch.zeros(self.num_clusters, dtype=torch.bool)
-            cluster_mask = torch.cat([cluster_macro_mask, cluster_cluster_mask], dim=0)
-            
-            # 创建cluster_data
-            cluster_data = Data(
-                x=cluster_all_sizes,
-                edge_index=cluster_edge_index,
-                edge_attr=cluster_edge_attr,
-                is_ports=cluster_mask,
-                cluster_map=cluster_map  # 存储原始id到聚类后id的映射
-            )
-            
-            # ==================== 返回数据 ====================
-            # 创建原始数据的mask
-            macro_mask = torch.ones(actual_macros, dtype=torch.bool)
-            cell_mask = torch.zeros(num_cells, dtype=torch.bool)
-            mask = torch.cat([macro_mask, cell_mask], dim=0)
+        # ========== 1. 构造所有 terminal 的真实坐标 ==========
+        terminal_positions = all_positions.unsqueeze(1) + terminal_offsets   # (V, T, 2)
+
+        V, T, _ = terminal_positions.shape
+        device = terminal_positions.device
+
+        # flatten: (V*T, 2)
+        flat_pos = terminal_positions.reshape(-1, 2)
+
+        # 每个 terminal 属于哪个 instance
+        terminal_instance_ids = (
+            torch.arange(V, device=device)
+            .repeat_interleave(T)
+        )
+
+        # ========== 2. KNN 构图（核心） ==========
+        # 每个 terminal 连接 k 个最近邻
+        # k = 8   # 可以调：8~32 都合理
+        # edge_index = knn_graph(
+        #     x=flat_pos,
+        #     k=k,
+        #     loop=False
+        # )   # shape: (2, E)
+        edge_index = radius_graph(flat_pos, r=0.005, max_num_neighbors=4)
+
+        src, dst = edge_index
+
+        # ========== 3. 过滤掉同 instance 内的边 ==========
+        mask = terminal_instance_ids[src] != terminal_instance_ids[dst]
+        src = src[mask]
+        dst = dst[mask]
+
+        # ========== 4. 计算距离 ==========
+        dist = torch.norm(flat_pos[src] - flat_pos[dst], dim=1)
+
+        # ========== 5. 按距离采样（保持你原 edge_dist 风格） ==========
+        # 假设你原逻辑是 dist 越小，概率越大
+        # 可以模拟 edge_dist
+        # prob = torch.exp(-dist / dist.mean())   # 可以自定义
+
+        # ========== 对齐原 edge_dist 语义 ==========
+        # scale = dist.mean().detach()
+
+        # # 模拟原始参数
+        # prob_multiplier_factor = self.edge_dist.dist_params.prob_multiplier_factor # 0.00792
+        # prob_multiplier_exp = self.edge_dist.dist_params.prob_multiplier_exp # -1.42
+        # prob_clip = self.edge_dist.dist_params.prob_clip # 0.9
+
+        # # 构造类似 scale 随机性的扰动（可选）
+        # scale_sample = scale * torch.exp(0.5 * torch.randn_like(dist))  # 模拟 log_uniform
+
+        # prob_multiplier = prob_multiplier_factor * (scale_sample ** prob_multiplier_exp)
+
+        # prob = prob_multiplier * torch.exp(-dist / scale_sample)
+        # prob = torch.clamp(prob, max=prob_clip)
         
-            # 创建原始data，并添加cluster_map
-            data = Data(x=all_sizes, edge_index=edge_index, edge_attr=edge_attr, is_ports=mask)
-            data.cluster_map = cluster_map
-            
-            # 在cluster_data中也存储cluster_map
-            cluster_data.cluster_map = cluster_map
-            
-            if self.zero_edge_attr:
-                edge_attr = 0 * edge_attr
-                cluster_data.edge_attr = 0 * cluster_data.edge_attr
-            
-            # 返回四个值：原始位置、原始数据、聚类后位置、聚类后数据
-            plot_sample(all_positions, data, f"data-gen/outputs/v2.61/pic/case_{idx}")
-            plot_sample(cluster_all_positions, cluster_data, f"data-gen/outputs/v2.61/pic/case_{idx}_cluster")
-            return all_positions, data, cluster_all_positions, cluster_data
-        # ==================== 返回数据 ====================
+        # keep = torch.rand_like(prob) < prob
+
+        # src = src[keep]
+        # dst = dst[keep]
+
+        target_ratio = torch.empty(1).uniform_(1.2, 1.8).item()
+        target_edges = int(target_ratio * num_instances)
+
+        # 用距离构造一个 soft score（越近越容易被选中）
+        score = torch.exp(-dist / dist.mean())
+
+        # 归一化为概率分布
+        prob = score / score.sum()
+
+        # 按 prob 无放回采样 target_edges 条边
+        num_edges = min(target_edges, prob.numel())
+        selected = torch.multinomial(prob, num_edges, replacement=False)
+
+        src = src[selected]
+        dst = dst[selected]
+
+        # ========== 6. 转回 (v, t) ==========
+        src_v = src // T
+        src_t = src % T
+        dst_v = dst // T
+        dst_t = dst % T
+
+        # ========== 7. 构造 edge_index & edge_attr ==========
+        edges_tensor = torch.stack([src_v, src_t, dst_v, dst_t], dim=1)
+
+        edge_index_forward = edges_tensor[:, [0, 2]].t()
+        edge_index_reverse = edges_tensor[:, [2, 0]].t()
+        edge_index = torch.cat([edge_index_forward, edge_index_reverse], dim=1)
+
+        edge_attr_source = terminal_offsets[src_v, src_t]
+        edge_attr_sink   = terminal_offsets[dst_v, dst_t]
+        edge_attr_forward = torch.cat([edge_attr_source, edge_attr_sink], dim=1)
+        edge_attr_reverse = torch.cat([edge_attr_sink, edge_attr_source], dim=1)
+        edge_attr = torch.cat([edge_attr_forward, edge_attr_reverse], dim=0)
+
+
+        # convert to edge list and generate attributes
+        
         mask = torch.cat([placement.get_mask(), torch.zeros(num_cells, dtype=torch.bool)], dim=0)
         is_macros = torch.cat([torch.ones(actual_macros, dtype=torch.bool), torch.zeros(num_cells, dtype=torch.bool)], dim=0)
         # if self.zero_edge_attr:
         #     edge_attr = 0 * edge_attr
-        
+
+        edge_timer.stop() if edge_timer else None
+        edge_pin_ids = {}
         data = Data(x=all_sizes, edge_index=edge_index, edge_attr=edge_attr, is_macros= is_macros, is_ports=mask, edge_pin_id = edge_pin_ids, numRow = num_rows)
         # print("==============================")
         # plot_sample(all_positions, data, f"data-gen/outputs/v2.61/pic/case_{idx}")
@@ -1319,6 +923,20 @@ class V2:
         delta_pos = t_pos_1 - t_pos_2 # (V, T, V, T, 2)  # 存储了 (x, y) 坐标差，delta_pos[3, 5, 10, 7] 就是 模块3的第5个端口 与 模块10的第7个端口 的坐标差 (dx, dy)
         distance = torch.norm(delta_pos, p=norm_order, dim=-1) # (V, T, V, T)
         return distance
+    
+    def get_terminal_distances_blockwise(self, terminal_positions):
+        V, T, _ = terminal_positions.shape
+        # 输出不再是完整大矩阵，而是生成器
+        for i in range(V):
+            for j in range(V):
+                pos_i = terminal_positions[i]  # (T,2)
+                pos_j = terminal_positions[j]  # (T,2)
+
+                delta = pos_i[:, None, :] - pos_j[None, :, :]
+                dist = torch.norm(delta, dim=-1)  # (T,T)
+
+                yield i, j, dist
+
 
     def process_edge_matrix(self, edge_exists, is_source, num_terminals):
         # edge_existence tensor (V, T, V, T)

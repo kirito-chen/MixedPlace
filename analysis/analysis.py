@@ -14,27 +14,27 @@ import matplotlib.pyplot as plt
 def main():
     startTime = time.time()
 
-    # base_dir = "benchmarks/ibmBookshelfModifyFixedMacro"
-    # output_file = "analysis/netlist_stats.csv"
-    # pic_dir = "analysis/pic"
+    base_dir = "benchmarks/ibmBookshelfModifyFixedMacro"
+    output_file = "analysis/netlist_stats.csv"
+    pic_dir = "analysis/pic"
 
-    base_dir = "data-gen/outputs/v2.61/CircuitGen"
-    output_file = "analysis/CircuitGen/netlist_stats.csv"
-    pic_dir = "analysis/CircuitGen/pic"
+    # base_dir = "data-gen/outputs/v2.61/CircuitGen"
+    # output_file = "analysis/CircuitGen/netlist_stats.csv"
+    # pic_dir = "analysis/CircuitGen/pic"
 
     # 写入表头
     with open(output_file, "w") as f:
         f.write(
             "case,numNodes,numMacros,numPins,numNets,"
             "total_area,macro_area,macro_ratio,"
-            "avg_degree,max_degree,top10_ratio,macro_net_ratio\n"
+            "avg_degree,max_degree,top10_ratio,macro_net_ratio,density\n"
         )
 
     # 循环 ibm01 -> ibm18
-    # for i in range(1, 19):
-    #     case = f"ibm{i:02d}"
-    for i in range(0, 2):
-        case= f"CircuitGen{i:04d}"
+    for i in range(1, 19):
+        case = f"ibm{i:02d}"
+    # for i in range(0, 2):
+    #     case= f"CircuitGen{i:04d}"
         auxInputFile = os.path.join(base_dir, case, f"{case}.aux")
 
         if not os.path.exists(auxInputFile):
@@ -55,6 +55,8 @@ def main():
 
         macro_area = sum(m.width * m.height for _, m in dataBase.macros.items())
         total_area = sum(n.width * n.height for _, n in dataBase.nodes.items())
+        die_area = dataBase.dieWidth * dataBase.dieHeight
+        density = total_area / die_area
         macro_ratio = macro_area / total_area if total_area > 0 else 0
 
         degrees = [len(net.pinIndex) for _, net in dataBase.nets.items()]
@@ -78,7 +80,7 @@ def main():
             f.write(
                 f"{case},{numNodes},{numMacros},{numPins},{numNets},"
                 f"{total_area:.2f},{macro_area:.2f},{macro_ratio:.6f},"
-                f"{avg_degree:.4f},{max_degree},{top10_ratio:.6f},{macro_net_ratio:.6f}\n"
+                f"{avg_degree:.4f},{max_degree},{top10_ratio:.6f},{macro_net_ratio:.6f}, {density:.4f}\n"
             )
         # ========== 统计每个 node 的 degree ==========
         node_degree = defaultdict(int)

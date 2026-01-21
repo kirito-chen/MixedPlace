@@ -1,16 +1,22 @@
 dataset_name: v2
 seed: 61
 out_dir: data-gen/outputs
-print_every: 2
-num_workers: 2  # 64
+print_every: 100
+num_workers: 32  # 64
+
+# 这两个在外部参数设置了
+# num_train_samples: 40000
+# num_val_samples: 2000
 
 algorithm: v2
 gen_params:
-  max_instance: 800 # 1600 # x4
+  max_instance: 800 # 1600 # x4  废弃
   # =========== new ===========
-  max_hard_macros: 300 # 
+  min_hard_macros: 150  # 150
+  max_hard_macros:  800 # 300 
   # max_soft_macros: 100 
-  max_cells: 210000 # 300000 #
+  min_cells: 10000  # 10000
+  max_cells: 220000  # 220000 
   # enable_macro_refine: 1
   # refine_ratio: 0.7
   num_clusters: 512
@@ -20,7 +26,7 @@ gen_params:
     dist_type: uniform
     dist_params:
       low: 0.75
-      high: 0.9
+      high: 0.85 # 0.9
   max_attempts_per_instance: 10
   aspect_ratio_dist:
     dist_type: uniform

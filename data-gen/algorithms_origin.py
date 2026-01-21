@@ -6,6 +6,7 @@ import numpy as np
 from torch_geometric.data import Data
 import torch_geometric.utils as tgu
 
+
 class V1:
     def __init__(
             self, 

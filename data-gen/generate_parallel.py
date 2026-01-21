@@ -65,7 +65,7 @@ def main(cfg):
     t_1 = time.time()
 
     num_samples = cfg.num_train_samples + cfg.num_val_samples
-    
+    print(cfg.num_train_samples," ", cfg.num_val_samples)
     while step < num_samples:
         # generate data
         # with mp.Pool(processes=cfg.num_workers) as pool:  
