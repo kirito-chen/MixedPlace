@@ -118,7 +118,7 @@ class DataBase:
         self.macroArea90 = 0.0 # macro area 90% 所对应的面积
         self.sclFile = None # scl的文件名，用于原样输出
         
-    def readBookshelf(self, auxFilePath):
+    def readBookshelf(self, auxFilePath, macroHeight = None):
         #获取文件目录
         dirPath = os.path.dirname(auxFilePath)
         fileList = None
@@ -131,7 +131,7 @@ class DataBase:
             filePath = dirPath + '/' + fileName  # 组成文件名
             
             if extension == ".nodes":
-                self.readNodes(filePath)
+                self.readNodes(filePath, macroHeight)
             elif extension == ".nets":
                 self.readNet(filePath)
             elif extension == ".wts":
@@ -142,7 +142,7 @@ class DataBase:
                 self.sclFile = filePath
                 self.readScl(filePath)
 
-    def readNodes(self, filePath):
+    def readNodes(self, filePath, macroHeight = None):
         with open(filePath) as inFile:
             #跳过前三行
             while True:
@@ -170,7 +170,8 @@ class DataBase:
                         attribute = words[3]
                     node = Node(nodeName, width, height, attribute)
                     self.nodes[nodeName] = node
-                    if attribute == "terminal" or attribute == "terminalNI" or attribute == "terminal_NI":
+                    if attribute == "terminal" or attribute == "terminalNI" or attribute == "terminal_NI" or \
+                        (macroHeight is not None and height > macroHeight):
                         if height >= 2:  # 排除pad
                             self.macros[nodeName] = node
 
@@ -1939,6 +1940,10 @@ class DataBase:
         exit()
         
     def readpyG(self, x, cond):
+        
+        ##### 超参数
+        is_hyper_edge = True
+
         # 缩放比例， [-1, 1] * [-1 , 1] 缩放到rowheight为16
         rowNum = cond.numRow
         rowheight = 2 / rowNum
@@ -1964,7 +1969,7 @@ class DataBase:
             if cond.is_macros[id] or cond.is_ports[id]:
                 self.macros[id] = node
         # net  目前的net都是无向边
-        if False: #cond.edge_pin_id:
+        if is_hyper_edge: #cond.edge_pin_id:
             netData = cond.edge_index.T
             pinData = cond.edge_attr
             edge2net = cond.edge_pin_id
@@ -1972,7 +1977,7 @@ class DataBase:
             # 按 netId 分组 edge
             net_groups = defaultdict(list)
             for e, netId in enumerate(edge2net):
-                net_groups[netId].append(e)
+                net_groups[netId.item()].append(e)
 
             # 构造每个 Net
             for netId, edge_indices in net_groups.items():
