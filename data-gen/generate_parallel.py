@@ -49,7 +49,7 @@ def main(cfg):
         wandb_run_name = f"circuit_gen.{cfg.dataset_name}.{cfg.seed}"
         outputs.append(common.logger.WandBOutput(wandb_run_name, cfg))
     
-    step = common.Counter(0)  # 初始化为 0 
+    step = common.Counter(3700)  # 初始化为 0 
     logger = common.Logger(step, outputs)
     utils.save_cfg(cfg, os.path.join(out_dir, "config.yaml"))
     
@@ -68,14 +68,14 @@ def main(cfg):
     print(cfg.num_train_samples," ", cfg.num_val_samples)
     while step < num_samples:
         # generate data
-        # with mp.Pool(processes=cfg.num_workers) as pool:  
-        #     sample_batch = pool.map(parallel_gen, range(int(step), int(step) + cfg.print_every), chunksize=1)
+        with mp.Pool(processes=cfg.num_workers) as pool:  
+            sample_batch = pool.map(parallel_gen, range(int(step), int(step) + cfg.print_every), chunksize=1)
         
         # 单个进程
-        sample_batch = []
-        for i in range(int(step), int(step) + cfg.print_every):
-            sample = generate_sample(circuit_gen, cfg.seed, i)
-            sample_batch.append(sample)
+        # sample_batch = []
+        # for i in range(int(step), int(step) + cfg.print_every):
+        #     sample = generate_sample(circuit_gen, cfg.seed, i)
+        #     sample_batch.append(sample)
 
         step.increment(amount = len(sample_batch))
         t_2 = time.time()

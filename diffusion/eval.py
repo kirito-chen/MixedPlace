@@ -218,10 +218,10 @@ def main(cfg):
     output_metrics = {}
     log_metrics = common.Metrics()
     for i in range(cfg.num_output_samples):
-        if i < 96:
-            continue
-        if i > 96:
-            break
+        # if i < 96:
+        #     continue
+        # if i > 96:
+        #     break
         t4 = time.time()
         if cfg.task == "ispd2005" and i == 5:
             continue  # 跳过ispd2005-5 因为会出现OOM

@@ -829,9 +829,9 @@ class V2:
 
 
         # convert to edge list and generate attributes
-        
-        mask = torch.cat([placement.get_mask(), torch.zeros(num_cells, dtype=torch.bool)], dim=0)
-        is_macros = torch.cat([torch.ones(actual_macros, dtype=torch.bool), torch.zeros(num_cells, dtype=torch.bool)], dim=0)
+        # !!!!!!!!!!!!! 加了额外的cell变量进去正确的num_cells应该为 num_instances - actual_macros !!!!!!!!!!!!!!!!!
+        mask = torch.cat([placement.get_mask(), torch.zeros(num_cells, dtype=torch.bool)], dim=0)  # 加了额外的cell变量进去正确的num_cells应该为 num_instances - actual_macros
+        is_macros = torch.cat([torch.ones(actual_macros, dtype=torch.bool), torch.zeros(num_cells, dtype=torch.bool)], dim=0)  # 加了额外的cell变量进去正确的num_cells应该为 num_instances - actual_macros
         # if self.zero_edge_attr:
         #     edge_attr = 0 * edge_attr
 

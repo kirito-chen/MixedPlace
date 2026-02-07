@@ -6,5 +6,6 @@ datasets/graph
 hmetis*
 logs
 preTrainModel
-# analysis/*.png
-# analysis/*.csv
+analysis
+results
+wandb

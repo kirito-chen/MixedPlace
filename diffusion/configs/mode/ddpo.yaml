@@ -6,7 +6,7 @@ actual_batch: 4  # 4 # 一次采样中循环采样的数量  只有用train_grap
 num_epochs: 150  # 训练总批次 200
 # all_sample_num: 10000
 num_batches_per_epoch: 8 # 16  # 采样和计算loss次数
-num_inner_epochs: 1 # 训练的内部次数 官方次数为1 请不要修改
+num_inner_epochs: 3 # 训练的内部次数 官方次数为1 请不要修改
 gradient_accumulation_steps: 10 # 累积梯度更新步数  需要 < total_timesteps  
 max_grad_norm: 1.0  # 梯度裁剪的最大梯度范数
 
@@ -19,7 +19,7 @@ clip_range: 1e-4 # the PPO clip range. 0.2 | 0.12 | 1e-4 为DDPO论文中采用�
 
 reward_version: "norm"  #  norm | oral
 
-save_freq: 20 # 保留间隔
+save_freq: 50 # 保留间隔
 eval_every: 5  # 评估间隔
 
 mse_loss_weight: 0.1
@@ -46,4 +46,4 @@ per_prompt_stat_tracking:
 
 # 是否开启中间奖励
 intermediate: True # True | False
-legal_gate: True # True | False
+legal_gate: False # True | False

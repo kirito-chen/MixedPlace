@@ -19,8 +19,8 @@ def main():
     bookshelfDir2 = f"data-gen/outputs/v2.61/{trainSetNameFixed}"
     # pyGFile = "data-gen/outputs/v2.61/00000110.pickle"
 
-    fileId = 0
-    for i in range(100, 2501, 100):  # 7501
+    fileId = 2500
+    for i in range(2600, 7501, 100): # range(100, 2501, 100):  # 7501
         pyGFile = f"data-gen/outputs/v2.61/{i:08d}.pickle"
         # pyGFile = f"/home/pc/data/cjq/work/chipdiffusion-main/data-gen/outputs/v2.61/{i:08d}.pickle"
         Logger.printPlace(f"deal with PyG file {pyGFile} ...")

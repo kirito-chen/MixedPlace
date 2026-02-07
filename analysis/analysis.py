@@ -14,13 +14,13 @@ import matplotlib.pyplot as plt
 def main():
     startTime = time.time()
 
-    base_dir = "benchmarks/ibmBookshelfModifyFixedMacro"
-    output_file = "analysis/netlist_stats.csv"
-    pic_dir = "analysis/pic"
+    # base_dir = "benchmarks/ibmBookshelfModifyFixedMacro"
+    # output_file = "analysis/netlist_stats.csv"
+    # pic_dir = "analysis/pic"
 
-    # base_dir = "data-gen/outputs/v2.61/CircuitGen"
-    # output_file = "analysis/CircuitGen/netlist_stats.csv"
-    # pic_dir = "analysis/CircuitGen/pic"
+    base_dir = "data-gen/outputs/v2.61/CircuitGen"
+    output_file = "analysis/CircuitGen/netlist_stats.csv"
+    pic_dir = "analysis/CircuitGen/pic"
 
     # 写入表头
     with open(output_file, "w") as f:
@@ -31,10 +31,10 @@ def main():
         )
 
     # 循环 ibm01 -> ibm18
-    for i in range(1, 19):
-        case = f"ibm{i:02d}"
-    # for i in range(0, 2):
-    #     case= f"CircuitGen{i:04d}"
+    # for i in range(1, 19):
+    #     case = f"ibm{i:02d}"
+    for i in range(0, 2):
+        case= f"CircuitGen{i:04d}"
         auxInputFile = os.path.join(base_dir, case, f"{case}.aux")
 
         if not os.path.exists(auxInputFile):

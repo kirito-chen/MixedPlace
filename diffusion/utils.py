@@ -262,8 +262,8 @@ def validate_ddpo(dataloader, model, ddpo_model, hpwl_w, legality_w, val_size = 
     t_total_start = time.time()
     for _ in range(val_size):
         # 获取一个验证样例
-        x, cond = dataloader.get_batch("val")
-
+        # x, cond = dataloader.get_batch("val")
+        (x, cond), idx = dataloader.get_batch_and_idx("val")
         x = x.unsqueeze(0).to(dataloader.device)       # (1, ...)
         # x = x.to(dataloader.device).view(1, *x.shape).expand(batch_size, *x.shape)
         
@@ -274,8 +274,10 @@ def validate_ddpo(dataloader, model, ddpo_model, hpwl_w, legality_w, val_size = 
             1, x[0], cond, intermediate_every=0
         )
         samples = samples.detach()
-        baseline_hpwl = hpwl_fast(x[0], cond, normalized_hpwl=True)
-        reward = ddpo_model.get_one_reward(samples[0], cond, baseline_hpwl, hpwl_w, legality_w)
+        # baseline_hpwl = hpwl_fast(x[0], cond, normalized_hpwl=True)
+        baseline_hpwl = cond.baselineHPWL[0].item()
+        # reward = ddpo_model.get_one_reward(samples[0], cond, baseline_hpwl, hpwl_w, legality_w)
+        reward = ddpo_model.get_DP_reward(idx[0].item(), samples[0], cond, baseline_hpwl, hpwl_w, legality_w, outLandH=False)
         rewards.append(reward)
         # t_item_end = time.time()
         # print(f"[VAL] idx={int(idx)}, time={t_item_end - t_item_start:.4f} sec")
@@ -688,6 +690,7 @@ def load_graph_data_with_config(dataset_name, train_data_limit = None, val_data_
     # generate a list of filenames along with placement and netlist
 
     dataset_path = os.path.join(os.path.dirname(__file__), f'../datasets/graph/{dataset_name}')
+    print(dataset_path)
     placement_path = dataset_path if override_placement_path is None else override_placement_path
     if os.path.exists(dataset_path):
         config = get_dataset_config(dataset_name)
@@ -777,7 +780,7 @@ def get_dataset_config(dataset_name):
         raise FileNotFoundError
 
 def load_synthetic_graph_data(dataset_name, train_data_limit = None, val_data_limit = None):
-    dataset_path = os.path.join(os.path.dirname(__file__), '../data-gen/outputs', dataset_name)
+    dataset_path = os.path.join(os.path.dirname(__file__), '../data-gen/outputs/v2.61', dataset_name)  # !!!! modify path in here
     NEEDS_CENTERING = False
     # load dataset config
     config_path = list(Path(dataset_path).glob("config.yaml"))

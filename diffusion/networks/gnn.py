@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.functional as F
 import numpy as np
 from .mlp import FiLM, MLP
-from .vit import AttentionBlockch
+from .vit import AttentionBlock
 import networks.layers as layers
 
 from torch.utils.checkpoint import checkpoint # <--- 导入 checkpoint

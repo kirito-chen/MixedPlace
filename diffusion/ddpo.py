@@ -1,14 +1,12 @@
 import torch
 import guidance
 import os
-
 import torch.distributions as dist
-
 from utils import visualize_placement, debug_plot_img, hpwl_fast, check_legality_new
-
 import torch.utils.checkpoint as checkpoint
-
 import math
+import re
+import subprocess
 
 class DDPO():
     
@@ -1155,6 +1153,8 @@ class DDPO():
         current_hpwl = hpwl_fast(x, cond, normalized_hpwl=True)
         legality_temp = check_legality_new(x, None, cond, cond.is_ports, score=True)
         hpwl_ratio_temp = 1.0 -  (current_hpwl) / (baseline_hpwl) # 1.8 
+        # hpwl_ratio_temp = (baseline_hpwl - current_hpwl) / baseline_hpwl
+
         # hpwl_ratio_temp = max(hpwl_ratio_temp, 0.4)  # 保底 防止对hpwl不优化了
         # hpwl_ratio_temp = min(hpwl_ratio_temp, 1.0)  # 补：匹配注释的上限1，避免异常值
         reward = _hpwl_weight * hpwl_ratio_temp  + _legality_weight * legality_temp
@@ -1164,13 +1164,115 @@ class DDPO():
             hpwl_ratio_temp = torch.tensor([hpwl_ratio_temp]).to(x.device)
             return reward, legality_temp, hpwl_ratio_temp
         return reward
+    
+    @torch.no_grad()
+    def get_DP_reward(self, idx, x, cond, baseline_hpwl, _hpwl_weight=1, _legality_weight=3, outLandH = False):
+        ''' 计算一个case的reward 用于sampling和eval '''
+        # current_hpwl = hpwl_fast(x, cond, normalized_hpwl=True)
+        # 1. 将结果写入Fixed文件
+        CircuitGenPath = f"data-gen/outputs/v2.61/CircuitGenFixedMacro/CircuitGenFixedMacro{idx:04d}"
+        # 写入node和pl文件
+        # data-gen/outputs/v2.61/CircuitGenFixedMacro/CircuitGenFixedMacro0000/CircuitGenFixedMacro0000.pl
+        plPath = os.path.join(CircuitGenPath, f"CircuitGenFixedMacro{idx:04d}.pl")
+        self.readAndWritePl(plPath, x, cond.cluster_map, cond.x[:, 1].min().item())
+        # 2. 调用DreamPlace
+        ### 写到这
+        json_path = f"/home/pc/data/cjq/DREAMPlace-master/install/testNew/CircuitGenFixedMacro/CircuitGenFixedMacro{idx:04d}.json"
+        current_hpwl = self.runDreamPlace(json_path)
+
+        legality_temp = check_legality_new(x, None, cond, cond.is_ports, score=True)
+        # hpwl_ratio_temp = 1.0 -  (current_hpwl) / (baseline_hpwl) # 1.8 
+        hpwl_ratio_temp = (baseline_hpwl - current_hpwl) / baseline_hpwl
+
+
+        ## 备选2 
+        # hpwl_ratio = current_hpwl / baseline_hpwl
+        # hpwl_reward = - (hpwl_ratio - 1.0) ** 2
+
+        # hpwl_ratio_temp = max(hpwl_ratio_temp, 0.4)  # 保底 防止对hpwl不优化了
+        # hpwl_ratio_temp = min(hpwl_ratio_temp, 1.0)  # 补：匹配注释的上限1，避免异常值
+        reward = _hpwl_weight * hpwl_ratio_temp  + _legality_weight * legality_temp
+        reward = torch.tensor([reward]).to(x.device)
+        if outLandH:
+            legality_temp = torch.tensor([legality_temp]).to(x.device)
+            hpwl_ratio_temp = torch.tensor([hpwl_ratio_temp]).to(x.device)
+            return reward, legality_temp, hpwl_ratio_temp
+        return reward
+    
+    @torch.no_grad()
+    def readAndWritePl(self, pl_path, x, cluster_map, rowheight):
+        pattern = re.compile(r"^\s*(\S+)\s+([\d\.]+)\s+([\d\.]+)\s+:\s+(\S+)(.*)$")
+        ROWHEIGHTTRUE = 16
+        scale = ROWHEIGHTTRUE / rowheight
+        new_lines = []
+
+        with open(pl_path, "r") as f:
+            for line in f:
+                line_strip = line.strip()
+
+                # 头部和注释原样保留
+                if not line_strip or line_strip.startswith("#") or line_strip.startswith("UCLA"):
+                    new_lines.append(line)
+                    continue
+
+                m = pattern.match(line)
+                if not m:
+                    new_lines.append(line)
+                    continue
+
+                name, old_x, old_y, orient, suffix = m.groups()
+
+                # 提取 originid
+                if name.startswith("a") and name[1:].isdigit():
+                    originid = int(name[1:])
+                    
+                    if originid in cluster_map:
+                        clusterid = cluster_map[originid].item()
+                        new_x, new_y = x[clusterid].tolist()
+                        new_x = (new_x + 1) * scale
+                        new_y = (new_y + 1) * scale
+                        # 重建这一行（保持格式）
+                        new_line = f"{name}  {new_x:.4f}  {new_y:.4f} : {orient}{suffix}\n"
+                        new_lines.append(new_line)
+                        continue
+
+                # 没匹配的保持原样
+                new_lines.append(line)
+
+        # 覆盖写回同一个文件
+        with open(pl_path, "w") as f:
+            f.writelines(new_lines)
 
     @torch.no_grad()
-    def get_reward(self, x0, cond, xt, x0_pre_list, intermediate=False,_hpwl_weight=1, _legality_weight=3): 
+    def runDreamPlace(self, json_path):
+        python_path = "/home/pc/anaconda3/envs/DreamPlaceNew/bin/python"
+        placer = "/home/pc/data/cjq/DREAMPlace-master/install/dreamplace/Placer.py"
+
+        cmd = [python_path, placer, json_path]
+        # print(f"run: {json_path}")
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True
+        )
+        if result.returncode != 0:
+            print("DreamPlace error:")
+            print(result.stderr)
+            raise RuntimeError("DreamPlace failed")
+        
+        # pattern = r"wHPWL\s+([0-9.+-Ee]+),"
+        pattern = r"iteration\s+\d+,\s+wHPWL\s+([0-9.+-Ee]+),"
+        matches = re.findall(pattern, result.stdout)
+
+        return float(matches[-1])
+
+    @torch.no_grad()
+    def get_reward(self, idx, x0, cond, xt, x0_pre_list, intermediate=False,_hpwl_weight=1, _legality_weight=3): 
         ''' x0_pre_list 最后一个是x0 前面是由时间步 T...0 # batch_size 只能为1 '''
         x0_detached = x0.detach()   # (B, V, 2)
         xt_detached = xt.detach()   # (B, V, 2)
-        baseline_hpwl = hpwl_fast(xt_detached[0], cond, normalized_hpwl=True)
+        # baseline_hpwl = hpwl_fast(xt_detached[0], cond, normalized_hpwl=True)
+        baseline_hpwl = cond.baselineHPWL[0].item()
         intermediate_rewards = []
         diff = None
         if intermediate:
@@ -1182,8 +1284,9 @@ class DDPO():
             diff[1:] = intermediate_rewards[1:] - intermediate_rewards[:-1]
             diff[0] = 0
         ########################### 计算x0
-        reward_x0, legal_x0, hpwl_x0 = self.get_one_reward(x0_detached[0], cond, baseline_hpwl, _hpwl_weight, _legality_weight, outLandH=True)
-        ###########################
+        # reward_x0, legal_x0, hpwl_x0 = self.get_one_reward(x0_detached[0], cond, baseline_hpwl, _hpwl_weight, _legality_weight, outLandH=True)
+        ########################### 调用dreamPlace
+        reward_x0, legal_x0, hpwl_x0 = self.get_DP_reward(idx[0].item(), x0_detached[0], cond, baseline_hpwl, _hpwl_weight, _legality_weight, outLandH=True)
         
         return reward_x0, legal_x0, hpwl_x0, diff # acc_reward(intermediate_rewards)
     

@@ -238,7 +238,7 @@ def main(cfg):
                     # 2.3 计算reward
                     # baseline_hpwl = baseline_hpwl_dict.get(idx, None)
                     # rewards, legality, hpwl = ddpo_model.reward_fn(x0, cond, x, batch_size, hpwl_w, legality_w, target_legal)  # 后续可以用异步计算
-                    rewards, legality, hpwl, intermediate_rewards = ddpo_model.get_reward(x0, cond, x, x0_pre_list, cfg.intermediate, cfg.ddpo.hpwl_weight, cfg.ddpo.legality_weight)
+                    rewards, legality, hpwl, intermediate_rewards = ddpo_model.get_reward(idx, x0, cond, x, x0_pre_list, cfg.intermediate, cfg.ddpo.hpwl_weight, cfg.ddpo.legality_weight)
                     rewards = rewards.to(device)
                     x_list = torch.stack(x_list, dim = 1)
                     log_probs = torch.stack(log_probs, dim = 1)
@@ -419,7 +419,7 @@ def main(cfg):
         if best_reward < rewards_mean:
             best_reward = rewards_mean
             best_epoch = epoch
-            checkpointer.save(os.path.join(log_dir, f"train_best.ckpt"))
+            checkpointer.save(os.path.join(log_dir, "train_best.ckpt"))  # f"train_best.ckpt"))
         # draw
         dram_step_reward.append((epoch, rewards_mean))
         legality_mean = sum(legality_list) / len(legality_list)
@@ -607,7 +607,7 @@ def main(cfg):
             if hpwl_mean_valid > best_min:   # hpwl_mean_valid 越大越好
                 best_min = hpwl_mean_valid
                 best_val_epoch = epoch
-                checkpointer.save(os.path.join(log_dir, f"best.ckpt"))
+                checkpointer.save(os.path.join(log_dir, f"val_best.ckpt"))
         
 
         # --------------------- 调度器更新（epoch结束后调用） ---------------------
