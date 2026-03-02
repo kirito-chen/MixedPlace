@@ -4,7 +4,7 @@
 
 # comment="1203 v2.6 DDPO  timesteps=50 batch=1  actual_batch=2  num_batch_per_epoch=16 inner_epochs=3 num_epochs=60 lr=1e-6  eta=0.3 v2.61优化率0.47%"
 
-comment="260207 2602052140-best"
+comment="260302 2602281113-best 不考虑合法化"
 
 echo "----------------------------------------"
 echo "目前提交的 comment 如下，提醒是否需要更新："

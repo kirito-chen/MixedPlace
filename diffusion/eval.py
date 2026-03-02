@@ -218,9 +218,9 @@ def main(cfg):
     output_metrics = {}
     log_metrics = common.Metrics()
     for i in range(cfg.num_output_samples):
-        # if i < 96:
+        # if i < 11:
         #     continue
-        # if i > 96:
+        # if i > 11:
         #     break
         t4 = time.time()
         if cfg.task == "ispd2005" and i == 5:

@@ -256,7 +256,7 @@ def validate_ddpo_hpwl(dataloader, model, num = 40):
     return logs
 
 @torch.no_grad()
-def validate_ddpo(dataloader, model, ddpo_model, hpwl_w, legality_w, val_size = 16):
+def validate_ddpo(dataloader, model, ddpo_model, cluster_baseline_hpwl_dict, hpwl_w, legality_w, val_size = 16):
     model.eval()
     rewards = []
     t_total_start = time.time()
@@ -265,6 +265,8 @@ def validate_ddpo(dataloader, model, ddpo_model, hpwl_w, legality_w, val_size = 
         # x, cond = dataloader.get_batch("val")
         (x, cond), idx = dataloader.get_batch_and_idx("val")
         x = x.unsqueeze(0).to(dataloader.device)       # (1, ...)
+        cluster_baseline_hpwl = cluster_baseline_hpwl_dict.get(idx.item(), None)
+        cluster_baseline_hpwl = torch.tensor(cluster_baseline_hpwl, device='cuda')
         # x = x.to(dataloader.device).view(1, *x.shape).expand(batch_size, *x.shape)
         
         cond = cond.to(dataloader.device)
@@ -277,7 +279,7 @@ def validate_ddpo(dataloader, model, ddpo_model, hpwl_w, legality_w, val_size = 
         # baseline_hpwl = hpwl_fast(x[0], cond, normalized_hpwl=True)
         baseline_hpwl = cond.baselineHPWL[0].item()
         # reward = ddpo_model.get_one_reward(samples[0], cond, baseline_hpwl, hpwl_w, legality_w)
-        reward = ddpo_model.get_DP_reward(idx[0].item(), samples[0], cond, baseline_hpwl, hpwl_w, legality_w, outLandH=False)
+        reward = ddpo_model.get_DP_reward(idx[0].item(), samples[0], cond, cluster_baseline_hpwl, baseline_hpwl, hpwl_w, legality_w, outLandH=False)
         rewards.append(reward)
         # t_item_end = time.time()
         # print(f"[VAL] idx={int(idx)}, time={t_item_end - t_item_start:.4f} sec")
@@ -2023,7 +2025,7 @@ def logging_video(frames, fps=15):
     return wandb.Video(frames, fps=fps)
 
 @torch.no_grad()
-def calcul_baseline_hpwl(dataloader, model):
+def calcul_baseline_hpwl_old(dataloader, model):
     dict = {}
     size = len(dataloader.train_set)
     for idx in range(size):
@@ -2032,3 +2034,66 @@ def calcul_baseline_hpwl(dataloader, model):
         hpwl_normalized = hpwl_fast(samples, cond, normalized_hpwl=True)
         dict[idx] = hpwl_normalized
     return dict
+
+import os
+import torch
+
+@torch.no_grad()
+def calcul_baseline_hpwl(
+    dataloader,
+    model,
+    cache_path="logs/baseline_hpwl_cluster_train.pt",
+    cache_path2="logs/baseline_hpwl_cluster_val.pt"
+):
+    # 1. 有缓存直接读
+    if os.path.exists(cache_path) and os.path.exists(cache_path2):
+        print(f"[INFO] Load baseline HPWL from {cache_path}")
+        baseline_hpwl_cluster =  torch.load(cache_path)
+        print(f"[INFO] Load baseline HPWL from {cache_path2}")
+        baseline_eval_hpwl_cluster =  torch.load(cache_path2)
+        return baseline_hpwl_cluster, baseline_eval_hpwl_cluster
+
+
+    # 2. 否则重新计算
+    print("[INFO] Computing train baseline HPWL...")
+    result = {}
+    size = len(dataloader.train_set)
+
+    for idx in range(size):
+        x, cond = dataloader.get_batch_with_idx("train", idx)
+        samples, _ = model.reverse_samples(
+            1, x, cond, intermediate_every=0
+        )
+        hpwl_normalized = hpwl_fast(
+            samples, cond, normalized_hpwl=True
+        )
+
+        # tensor / float 都可以直接存
+        result[idx] = hpwl_normalized
+
+    # 3. 保存
+    torch.save(result, cache_path)
+    print(f"[INFO] Baseline train HPWL saved to {cache_path}")
+
+    # 4. 否则重新计算
+    print("[INFO] Computing val baseline HPWL...")
+    result_val = {}
+    size = len(dataloader.val_set)
+
+    for idx in range(size):
+        x, cond = dataloader.get_batch_with_idx("val", idx)
+        samples, _ = model.reverse_samples(
+            1, x, cond, intermediate_every=0
+        )
+        hpwl_normalized = hpwl_fast(
+            samples, cond, normalized_hpwl=True
+        )
+
+        # tensor / float 都可以直接存
+        result_val[idx] = hpwl_normalized
+
+    # 3. 保存
+    torch.save(result_val, cache_path2)
+    print(f"[INFO] Baseline val HPWL saved to {cache_path2}")
+
+    return result, result_val

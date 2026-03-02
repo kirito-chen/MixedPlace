@@ -129,8 +129,8 @@ def main(cfg):
         )
     
     ################### 计算模型此时获得的布局的线长 baseline_hpwl_dict ###################
-    # baseline_hpwl_dict = {}
-    # baseline_hpwl_dict = utils.calcul_baseline_hpwl(dataloader, model)
+    cluster_baseline_hpwl_train = {}
+    cluster_baseline_hpwl_train, cluster_baseline_hpwl_val = utils.calcul_baseline_hpwl(dataloader, model)
 
     stat_tracker = PerPromptStatTracker(
         buffer_size=cfg.per_prompt_stat_tracking.stat_tracker_buffer_size,
@@ -236,9 +236,10 @@ def main(cfg):
                     # x_list最后一个就是x0, 第一个就是纯噪声  x_list, log_probs本身都是列表
                     
                     # 2.3 计算reward
-                    # baseline_hpwl = baseline_hpwl_dict.get(idx, None)
+                    cluster_baseline_hpwl = cluster_baseline_hpwl_train.get(idx.item(), None)
+                    cluster_baseline_hpwl = torch.tensor(cluster_baseline_hpwl, device=device)
                     # rewards, legality, hpwl = ddpo_model.reward_fn(x0, cond, x, batch_size, hpwl_w, legality_w, target_legal)  # 后续可以用异步计算
-                    rewards, legality, hpwl, intermediate_rewards = ddpo_model.get_reward(idx, x0, cond, x, x0_pre_list, cfg.intermediate, cfg.ddpo.hpwl_weight, cfg.ddpo.legality_weight)
+                    rewards, legality, hpwl, intermediate_rewards = ddpo_model.get_reward(idx, x0, cond, x, x0_pre_list, cluster_baseline_hpwl, cfg.intermediate, cfg.ddpo.hpwl_weight, cfg.ddpo.legality_weight)
                     rewards = rewards.to(device)
                     x_list = torch.stack(x_list, dim = 1)
                     log_probs = torch.stack(log_probs, dim = 1)
@@ -598,7 +599,7 @@ def main(cfg):
             num = 50
             if  eval_time % 5 == 0:
                 num = 400 # 每过五次做一次全数据测评
-            val_logs = utils.validate_ddpo(dataloader, model, ddpo_model, cfg.ddpo.hpwl_weight, cfg.ddpo.legality_weight, val_size=num) # num是进行验证的数据集的数量
+            val_logs = utils.validate_ddpo(dataloader, model, ddpo_model, cluster_baseline_hpwl_val, cfg.ddpo.hpwl_weight, cfg.ddpo.legality_weight, val_size=num) # num是进行验证的数据集的数量
             # val = val_logs["hpwl_mean"]
             hpwl_mean_valid = val_logs["reward"]    
 

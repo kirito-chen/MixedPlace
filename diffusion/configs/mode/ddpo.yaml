@@ -3,7 +3,7 @@ batch_size: 1  # 是同一个case的副本数量，因为节点维度不一样
 actual_batch: 4  # 4 # 一次采样中循环采样的数量  只有用train_graph_actual_batch才起作用 也就是多少个不同样例，真正的batch_size
 # actual_batch 最大就是16，32就会OOM
 ##### 训练总次数 num_epochs * 2 * num_batches_per_epoch * total_timesteps
-num_epochs: 150  # 训练总批次 200
+num_epochs: 100 # 训练总批次 200
 # all_sample_num: 10000
 num_batches_per_epoch: 8 # 16  # 采样和计算loss次数
 num_inner_epochs: 3 # 训练的内部次数 官方次数为1 请不要修改
@@ -45,5 +45,5 @@ per_prompt_stat_tracking:
   stat_tracker_min_count: 5  # 某个prompt历史记录达到多少个才用自己的均值和std
 
 # 是否开启中间奖励
-intermediate: True # True | False
+intermediate: False # True | False
 legal_gate: False # True | False
