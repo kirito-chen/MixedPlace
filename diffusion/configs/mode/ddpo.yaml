@@ -45,5 +45,5 @@ per_prompt_stat_tracking:
   stat_tracker_min_count: 5  # 某个prompt历史记录达到多少个才用自己的均值和std
 
 # 是否开启中间奖励
-intermediate: False # True | False
+intermediate: True # True | False
 legal_gate: False # True | False
