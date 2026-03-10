@@ -379,7 +379,7 @@ def main(cfg):
             G_t[:, -1] = reward_t[:, -1]  # 最后一步G_t = 最后一步奖励
             
             # 倒序计算累积回报（t从48到0）
-            gamma = 1 # 50步短时序无折扣，固定1.0
+            gamma = 1.0 # 50步短时序无折扣，固定1.0 0.95
             for t in range(num_timesteps-2, -1, -1):
                 G_t[:, t] = reward_t[:, t] + gamma * G_t[:, t+1]
 

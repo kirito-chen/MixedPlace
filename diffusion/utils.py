@@ -482,13 +482,15 @@ def save_outputs(
     All outputs are after preprocessing, and before postprocessing. tensors are on cpu
     """
     idx = cond.file_idx if "file_idx" in cond else output_number_offset
+
     x_in = torch.unsqueeze(x_in, dim=0).to(model.device)
+
     original_device = cond.x.device
     cond.to(model.device)
     metrics = {}
     metrics_special = {} # For things that should not be aggregated like plots, images, etc.
 
-    drawPic = True
+    drawPic = False
 
     # 评测时间 忽略画图
     if drawPic:
@@ -581,7 +583,7 @@ def save_outputs(
         macro_legality = 0.0
     original_hpwl_normalized = hpwl_fast(x_preprocessed, cond_preprocessed, normalized_hpwl=True)
     t4 = time.time()
-
+    dp_hpwl = get_dp_hpwl(idx, sample_unprocessed, cond)
     cond.to(original_device)
 
     metrics.update({
@@ -600,8 +602,92 @@ def save_outputs(
         "all_time": t4-t0,
         "model_vertices": cond_preprocessed.num_nodes, # number of vertices that model input has
         "model_edges": cond_preprocessed.num_edges, # number of edges that model input has
+        "dp_hpwl": dp_hpwl, # dreamPlace运行的线长
     })
     return metrics, metrics_special, image, image_legalized
+
+def get_dp_hpwl(idx, x, cond):
+    # 2. 调用 DreamPlace 计算最终 HPWL 并计算改进率
+    # 写入Fixed文件
+    CircuitGenPath = f"data-gen/outputs/v2.61/CircuitGenFixedMacro/CircuitGenFixedMacro{idx:04d}"
+    # 写入node和pl文件
+    # data-gen/outputs/v2.61/CircuitGenFixedMacro/CircuitGenFixedMacro0000/CircuitGenFixedMacro0000.pl
+    plPath = os.path.join(CircuitGenPath, f"CircuitGenFixedMacro{idx:04d}.pl")
+    readAndWritePl(plPath, x, cond.cluster_map, cond.x[:, 1].min().item())
+    # 调用DreamPlace
+    json_path = f"/home/pc/data/cjq/DREAMPlace-master/install/testNew/CircuitGenFixedMacro/CircuitGenFixedMacro{idx:04d}.json"
+    current_hpwl = runDreamPlace(json_path)
+    return current_hpwl
+
+@torch.no_grad()
+def readAndWritePl(pl_path, x, cluster_map, rowheight):
+    pattern = re.compile(r"^\s*(\S+)\s+([\d\.]+)\s+([\d\.]+)\s+:\s+(\S+)(.*)$")
+    ROWHEIGHTTRUE = 16
+    scale = ROWHEIGHTTRUE / rowheight
+    new_lines = []
+
+    with open(pl_path, "r") as f:
+        for line in f:
+            line_strip = line.strip()
+
+            # 头部和注释原样保留
+            if not line_strip or line_strip.startswith("#") or line_strip.startswith("UCLA"):
+                new_lines.append(line)
+                continue
+
+            m = pattern.match(line)
+            if not m:
+                new_lines.append(line)
+                continue
+
+            name, old_x, old_y, orient, suffix = m.groups()
+
+            # 提取 originid
+            if name.startswith("a") and name[1:].isdigit():
+                originid = int(name[1:])
+                
+                if originid in cluster_map:
+                    clusterid = cluster_map[originid].item()
+                    new_x, new_y = x[clusterid].tolist()
+                    new_x = (new_x + 1) * scale
+                    new_y = (new_y + 1) * scale
+                    # 重建这一行（保持格式）
+                    new_line = f"{name}  {new_x:.4f}  {new_y:.4f} : {orient}{suffix}\n"
+                    new_lines.append(new_line)
+                    continue
+
+            # 没匹配的保持原样
+            new_lines.append(line)
+
+    # 覆盖写回同一个文件
+    with open(pl_path, "w") as f:
+        f.writelines(new_lines)
+
+@torch.no_grad()
+def runDreamPlace(self, json_path):
+    python_path = "/home/pc/anaconda3/envs/DreamPlaceNew/bin/python"
+    placer = "/home/pc/data/cjq/DREAMPlace-master/install/dreamplace/Placer.py"
+
+    cmd = [python_path, placer, json_path]
+    # print(f"run: {json_path}")
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True
+    )
+    if result.returncode != 0:
+        print("DreamPlace error:")
+        print(result.stderr)
+        raise RuntimeError("DreamPlace failed")
+    
+    # pattern = r"wHPWL\s+([0-9.+-Ee]+),"
+    pattern = r"iteration\s+\d+,\s+wHPWL\s+([0-9.+-Ee]+),"
+    matches = re.findall(pattern, result.stdout)
+    # print(f"result.stdout:\n{result.stdout}")
+    # print(f"float(matches[-1]):{float(matches[-1])}")
+
+    return float(matches[-1])
+
 
 def compute_intermediate_stats(intermediates):
     # input: intermediates is a list, each is (B, C, H, W)
@@ -782,6 +868,7 @@ def get_dataset_config(dataset_name):
         raise FileNotFoundError
 
 def load_synthetic_graph_data(dataset_name, train_data_limit = None, val_data_limit = None):
+    # '../data-gen/outputs/v2.61' 用于训练  '../data-gen/outputs' 用于评测 eval
     dataset_path = os.path.join(os.path.dirname(__file__), '../data-gen/outputs/v2.61', dataset_name)  # !!!! modify path in here
     NEEDS_CENTERING = False
     # load dataset config

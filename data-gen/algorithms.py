@@ -505,7 +505,7 @@ class V2:
         actual_macros = macro_positions.shape[0]
         # print(f"DEBUG: Placed {actual_macros} macros")
         
-        # random_cell = True
+        # 目前 配置文件中 random_cell = True
         # 生成cell模块 方式1  随机生成
         if self.random_cell:
             # ==================== 生成cell模块 ====================
@@ -765,32 +765,6 @@ class V2:
 
         # ========== 4. 计算距离 ==========
         dist = torch.norm(flat_pos[src] - flat_pos[dst], dim=1)
-
-        # ========== 5. 按距离采样（保持你原 edge_dist 风格） ==========
-        # 假设你原逻辑是 dist 越小，概率越大
-        # 可以模拟 edge_dist
-        # prob = torch.exp(-dist / dist.mean())   # 可以自定义
-
-        # ========== 对齐原 edge_dist 语义 ==========
-        # scale = dist.mean().detach()
-
-        # # 模拟原始参数
-        # prob_multiplier_factor = self.edge_dist.dist_params.prob_multiplier_factor # 0.00792
-        # prob_multiplier_exp = self.edge_dist.dist_params.prob_multiplier_exp # -1.42
-        # prob_clip = self.edge_dist.dist_params.prob_clip # 0.9
-
-        # # 构造类似 scale 随机性的扰动（可选）
-        # scale_sample = scale * torch.exp(0.5 * torch.randn_like(dist))  # 模拟 log_uniform
-
-        # prob_multiplier = prob_multiplier_factor * (scale_sample ** prob_multiplier_exp)
-
-        # prob = prob_multiplier * torch.exp(-dist / scale_sample)
-        # prob = torch.clamp(prob, max=prob_clip)
-        
-        # keep = torch.rand_like(prob) < prob
-
-        # src = src[keep]
-        # dst = dst[keep]
 
         target_ratio = torch.empty(1).uniform_(1.2, 1.8).item()
         target_edges = int(target_ratio * num_instances)

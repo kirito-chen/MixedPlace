@@ -49,7 +49,7 @@ def main(cfg):
         wandb_run_name = f"circuit_gen.{cfg.dataset_name}.{cfg.seed}"
         outputs.append(common.logger.WandBOutput(wandb_run_name, cfg))
     
-    step = common.Counter(3700)  # 初始化为 0 
+    step = common.Counter(0)  # 初始化为 0 
     logger = common.Logger(step, outputs)
     utils.save_cfg(cfg, os.path.join(out_dir, "config.yaml"))
     

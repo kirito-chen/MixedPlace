@@ -30,8 +30,8 @@ ent_coef: 1e-3
 scale_factor: 1  # hpwl优化率放大倍率
 
 ddpo:
-  legality_weight: 1
   hpwl_weight: 1
+  legality_weight: 3
   legal_target: 0.93  # 合法化惩罚项目标
   ema_factor: 0.92 # 0.999 | 0.99 
   adam_beta1: 0.9

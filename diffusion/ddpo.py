@@ -1166,34 +1166,54 @@ class DDPO():
         return reward
     
     @torch.no_grad()
-    def get_DP_reward(self, idx, x, cond, cluster_baseline_hpwl, baseline_hpwl, _hpwl_weight=1, _legality_weight=3, outLandH = False):
+    def get_DP_reward(self, idx, x, cond, cluster_baseline_hpwl, baseline_hpwl, _hpwl_weight=1, _legality_weight=3, outLandH = False, outdpHPWL = False):
         ''' 计算一个case的reward 用于sampling和eval '''
-        cluster_hpwl = hpwl_fast(x, cond, normalized_hpwl=True)
 
+        # 1. 计算聚类阶段的 HPWL 改进率（基础项）
+        cluster_hpwl = hpwl_fast(x, cond, normalized_hpwl=True)
+        # 确保cluster_baseline_hpwl是Tensor（如果是数值则转为Tensor）
+        if not isinstance(cluster_baseline_hpwl, torch.Tensor):
+            cluster_baseline_hpwl = torch.tensor(cluster_baseline_hpwl, device=x.device, dtype=torch.float32)
+        if not isinstance(cluster_hpwl, torch.Tensor):
+            cluster_hpwl = torch.tensor(cluster_hpwl, device=x.device, dtype=torch.float32)
         hpwl_cluster_ratio = (cluster_baseline_hpwl - cluster_hpwl) / cluster_baseline_hpwl
         hpwl_cluster_ratio = torch.clamp(hpwl_cluster_ratio, min=0.0, max=1.0)
-        # 1. 将结果写入Fixed文件
+
+        # 2. 调用 DreamPlace 计算最终 HPWL 并计算改进率
+        # 写入Fixed文件
         CircuitGenPath = f"data-gen/outputs/v2.61/CircuitGenFixedMacro/CircuitGenFixedMacro{idx:04d}"
         # 写入node和pl文件
         # data-gen/outputs/v2.61/CircuitGenFixedMacro/CircuitGenFixedMacro0000/CircuitGenFixedMacro0000.pl
         plPath = os.path.join(CircuitGenPath, f"CircuitGenFixedMacro{idx:04d}.pl")
         self.readAndWritePl(plPath, x, cond.cluster_map, cond.x[:, 1].min().item())
-        # 2. 调用DreamPlace
+        # 调用DreamPlace
         json_path = f"/home/pc/data/cjq/DREAMPlace-master/install/testNew/CircuitGenFixedMacro/CircuitGenFixedMacro{idx:04d}.json"
         current_hpwl = self.runDreamPlace(json_path)
+        if outdpHPWL:
+            return current_hpwl
 
+        baseline_hpwl_tensor = torch.tensor(baseline_hpwl, device=x.device, dtype=torch.float32)
+        current_hpwl_tensor = torch.tensor(current_hpwl, device=x.device, dtype=torch.float32)
+
+        hpwl_final_ratio = (baseline_hpwl_tensor - current_hpwl_tensor) / baseline_hpwl_tensor
+        hpwl_final_ratio = torch.clamp(hpwl_final_ratio, min=0.0, max=1.0)  # 现在是Tensor，可正常clamp
+
+        # 3. 融合聚类和最终 HPWL 改进率（加权平均，突出最终效果）
+        hpwl_ratio_temp = 0.3 * hpwl_cluster_ratio + 0.7 * hpwl_final_ratio
+        hpwl_ratio_temp = torch.clamp(hpwl_ratio_temp, min=-0.5, max=1.0)  # 确保范围 [-0.5,1]
+
+        # 4. 计算合法性分数
         legality_temp = check_legality_new(x, None, cond, cond.is_ports, score=True)
-        # hpwl_ratio_temp = 1.0 -  (current_hpwl) / (baseline_hpwl) # 1.8 
-        hpwl_ratio_temp0 = (baseline_hpwl - current_hpwl) / baseline_hpwl
-        hpwl_ratio_temp = hpwl_ratio_temp0 + hpwl_cluster_ratio
+        # 兼容legality_temp是数值或Tensor的情况
+        if not isinstance(legality_temp, torch.Tensor):
+            legality_temp = torch.tensor(legality_temp, device=x.device, dtype=torch.float32)
+        
+        # 5. 优化的奖励函数设计
+        hpwl_reward = _hpwl_weight * hpwl_ratio_temp
+        legality_reward = _legality_weight * legality_temp
+        # 关键：合法性对 HPWL 奖励的“门控”作用（不合法时 HPWL 奖励打折扣）
+        reward = legality_reward + (hpwl_reward * legality_temp)
 
-        ## 备选2 
-        # hpwl_ratio = current_hpwl / baseline_hpwl
-        # hpwl_reward = - (hpwl_ratio - 1.0) ** 2
-
-        # hpwl_ratio_temp = max(hpwl_ratio_temp, 0.4)  # 保底 防止对hpwl不优化了
-        # hpwl_ratio_temp = min(hpwl_ratio_temp, 1.0)  # 补：匹配注释的上限1，避免异常值
-        reward = _hpwl_weight * hpwl_ratio_temp  #+ _legality_weight * legality_temp   # 不考虑合法化
         reward = torch.tensor([reward]).to(x.device)
         if outLandH:
             legality_temp = torch.tensor([legality_temp]).to(x.device)
@@ -1293,6 +1313,30 @@ class DDPO():
         reward_x0, legal_x0, hpwl_x0 = self.get_DP_reward(idx[0].item(), x0_detached[0], cond, cluster_baseline_hpwl, baseline_hpwl, _hpwl_weight, _legality_weight, outLandH=True)
         
         return reward_x0, legal_x0, hpwl_x0, diff # acc_reward(intermediate_rewards)
+    
+    @torch.no_grad()
+    def get_dp_hpwl(self, idx, x0, cond, xt, x0_pre_list, cluster_baseline_hpwl, intermediate=False,_hpwl_weight=1, _legality_weight=3): 
+        ''' 用于测试 '''
+        x0_detached = x0.detach()   # (B, V, 2)
+        xt_detached = xt.detach()   # (B, V, 2)
+        # baseline_hpwl = hpwl_fast(xt_detached[0], cond, normalized_hpwl=True)
+        baseline_hpwl = cond.baselineHPWL[0].item()
+        intermediate_rewards = []
+        diff = None
+        if intermediate:
+            for x0_pre in x0_pre_list:
+                intermediate_rewards.append(self.get_one_reward(x0_pre[0], cond, cluster_baseline_hpwl, _hpwl_weight, _legality_weight))
+            # 用差值表示reward
+            intermediate_rewards = torch.cat(intermediate_rewards, dim=0)
+            diff = torch.zeros_like(intermediate_rewards)
+            diff[1:] = intermediate_rewards[1:] - intermediate_rewards[:-1]
+            diff[0] = 0
+        ########################### 计算x0
+        # reward_x0, legal_x0, hpwl_x0 = self.get_one_reward(x0_detached[0], cond, baseline_hpwl, _hpwl_weight, _legality_weight, outLandH=True)
+        ########################### 调用dreamPlace
+        dpHPWL = self.get_DP_reward(idx[0].item(), x0_detached[0], cond, cluster_baseline_hpwl, baseline_hpwl, _hpwl_weight, _legality_weight, outLandH=True, outdpHPWL=True)
+        
+        return dpHPWL
     
 
 def acc_reward(intermediate_rewards, gamma = 0.99):

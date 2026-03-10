@@ -226,8 +226,9 @@ def main(cfg):
         if cfg.task == "ispd2005" and i == 5:
             continue  # 跳过ispd2005-5 因为会出现OOM
         x, cond = val_set[i]
+        # print(f"debug:::::::main::::::{x.shape}")
         metrics, metrics_special, image, image_legalized = utils.save_outputs(
-            x, 
+            x,  # 修改的  x[0]  原本是  x
             cond, 
             model, 
             save_folder=sample_dir, 

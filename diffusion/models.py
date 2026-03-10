@@ -1405,7 +1405,7 @@ class ContinuousDiffusionModel(nn.Module):
     def reverse_samples(self, B, x_in, cond, num_timesteps=-1, intermediate_every = 0, mask_override = None):
         # B: batch size
         # intermediate_every: determines how often intermediate diffusion steps are saved and returned. 0 = no intermediates returned
-        batch_shape = (B, cond.x.shape[0], self.input_shape[1])
+        batch_shape = (B, cond.x.shape[0], 2) # self.input_shape[1])
         mask_shape = (1, x_in.shape[1], 1)
 
         if num_timesteps <= 0:
